@@ -1,0 +1,42 @@
+code_type: "php"
+description: |-
+    Базовый игровой фреймворк на языке php создан для 2д RPG игр. На нем работает демоснтрационная онлайн игра Игорь с открытым бесшовным миром 
+init: |-
+    # если указано 0 - функции не замеряются
+    DEFINE("PERFOMANCE_TIMEOUT", 15);
+
+    DEFINE("MAP_ID", {map_id});
+    DEFINE("GAME_ID", {game_id});
+	DEFINE("STEP", {step});
+    DEFINE("POSITION_PRECISION", {position_precision});
+    
+    Components::init({components});
+    Events::init({events});
+    Position::init({positions});
+    Map2D::init({sides}, {maps});
+    
+    World::init({world});
+    
+    foreach({entitys} as $type=>$entitys)
+    {
+        foreach($entitys as $data)
+        {
+            $class = ucfirst($type);
+            $entity = new $class(...$data); 
+            World::add($entity);
+        }
+    }
+   
+tick: |-
+    # окончательно удалить игроков и сущности на удаление. должно быть в начале кадра а не в конце что бы по удаленным существам пришли пакеты вначале (а то орубим игроак ДО того как придет его пакет о переходе на карту другую)
+    World::refresh();
+    
+    # запустим выполнение команд отправленных игроками (кроме тех что удалены окончательно) или смежными локациями (они могут вешать событий существам с текущей)
+    if($data)
+        RemoteCommand::run($data);
+    
+    # запуск обработки существ с текущей карты и их событий (кода из админ панели)					
+    Frame::tick();
+
+    # сбор всех изменений существ за этот кадр и возврат из в виде одного пакета обратно в Игровой сервер (после он отправит их в WebSocket
+    return World::collected();
