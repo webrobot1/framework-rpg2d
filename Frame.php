@@ -85,7 +85,7 @@ abstract class Frame
 						Block::$object_change = Block::$components	= $entity->key;																															
 						$event_sandbox($entity, $data, $from_client);												
 					}
-					catch(\Exception $ex)
+					catch(Exception $ex)
 					{
 						// исключения типа Exception у игроков с текущей карты не рушим сервер, а отключам игроков
 						if($entity->map_id == MAP_ID && $entity->type == EntityTypeEnum::Players->value)
