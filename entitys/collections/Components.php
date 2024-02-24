@@ -10,7 +10,7 @@ class Components extends AbstractCollection
 		parent::__construct();
 		
 		#Perfomance - экономит доли миллисекунды за счет отуствия постоянного обращение к свойствам объекта (везде пихать нет смысла, а только там где более 1 раза идет обращение, а ссылкой что бы не тратить память)
-		$remote_update = &$this->object->remote_update;
+		$remote_update = $this->object->remote_update;
 		$object_type = &$this->object->type;
 			
 		if(!$remote_update && World::isset($this->object->key))

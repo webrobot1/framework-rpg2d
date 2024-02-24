@@ -72,9 +72,9 @@ class EventGroup
 			if(APP_DEBUG)
 				$this->log('удаления (remove)');
 		
-			#Perfomance - экономит доли миллисекунды за счет отуствия постоянного обращение к свойствам объекта (везде пихать нет смысла, а только там где более 1 раза идет обращение. remote_update  ссылкой что бы не тратить память)
+			#Perfomance - экономит доли миллисекунды за счет отуствия постоянного обращение к свойствам объекта (везде пихать нет смысла, а только там где более 1 раза идет обращение)
 			$is_another_map = ($this->object->map_id!=MAP_ID?$this->object->map_id:null);
-			$remote_update = &$this->object->remote_update;
+			$remote_update = $this->object->remote_update;
 		
 			// если пытаемся событие удалить существу с другого сервера то только отправляем пакет выше, но фактически не меняем
 			if(!$is_another_map || $remote_update)
@@ -114,7 +114,7 @@ class EventGroup
 		#Perfomance - это экономия долей миллисекунды но тем не менее экономия за счет отсутвия обращения к обхектам
 		$is_event_exists = !empty($this->event);
 		$is_another_map = ($this->object->map_id!=MAP_ID?$this->object->map_id:null);
-		$remote_update = &$this->object->remote_update;
+		$remote_update = $this->object->remote_update;
 		
 		
 		### Внимание! ниже уже Exception при которых сервер не падает а отключатеся только клиент ###
@@ -245,7 +245,7 @@ class EventGroup
 			throw new Error('добавленные секундые на который сбвсавыется таймаут от текущего времени должно быть положительным числом или нулем, '.$seconds.' указано');
 
 		#Perfomance - это экономия долей миллисекунды но тем не менее экономия за счет отсутвия обращения к объекту
-		$remote_update = &$this->object->remote_update;
+		$remote_update = $this->object->remote_update;
 		
 		if(isset($this->_time) && !$remote_update)
 			$remain = $this->remainTime();
