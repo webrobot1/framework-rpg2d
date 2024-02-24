@@ -15,7 +15,7 @@ class EventGroup
 	function __construct(protected EntityAbstract $object, public readonly string $name)
 	{	
 		#Perfomance - прямая ссылка на свойство убыстрит получение данных X2 (за счет отсутствия постоянного обращение к объекту)
-		$object_type = &$this->object->type;
+		$object_type = $this->object->type;
 		
 		if(!empty(Events::list()[$this->name]['entitys']) && !isset(Events::list()[$this->name]['entitys'][$object_type]))
 			throw new Error('событие '.$this->name.' не разрешено для '.$object_type);

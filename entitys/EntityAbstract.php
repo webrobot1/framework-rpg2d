@@ -242,7 +242,7 @@ abstract class EntityAbstract
 			throw new Error('Стоит запрет на изменение компонентов и свойств '.(is_string(Block::$object_change)?'других существ':'любого существа'));
 		
 		#Perfomance - исключительно что бы убыстрить доступ к данным (при записи скорость таже, а при чтении х2)
-		$map_id = &$this->map_id;
+		$map_id = $this->map_id;
 		$remote_update = &$this->remote_update;
 		
 		if($key == 'remote_update')

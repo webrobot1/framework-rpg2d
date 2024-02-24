@@ -9,9 +9,9 @@ class Components extends AbstractCollection
 	{
 		parent::__construct();
 		
-		#Perfomance - экономит доли миллисекунды за счет отуствия постоянного обращение к свойствам объекта (везде пихать нет смысла, а только там где более 1 раза идет обращение, а ссылкой что бы не тратить память)
+		#Perfomance - экономит доли миллисекунды за счет отуствия постоянного обращение к свойствам объекта (везде пихать нет смысла, а только там где более 1 раза идет обращение)
 		$remote_update = $this->object->remote_update;
-		$object_type = &$this->object->type;
+		$object_type = $this->object->type;
 			
 		if(!$remote_update && World::isset($this->object->key))
 			throw new Error('нельзя переписать уже существующие компоненты принудительно существу '.$this->object->key.' с текущей локации');			
@@ -47,7 +47,7 @@ class Components extends AbstractCollection
 		if (!array_key_exists($key, $this->values)) 
 		{
 			#Perfomance - экономит доли миллисекунды за счет отуствия постоянного обращение к свойствам объекта
-			$object_type = &$this->object->type;
+			$object_type = $this->object->type;
 			
 			if(empty(static::$_list[$object_type][$key]))
 				throw new Error('Компонент '.$key.' не разрешен для сущности '.$this->object->key.' с типом '.$object_type);
@@ -62,8 +62,8 @@ class Components extends AbstractCollection
 	public function add(string $key, $value):void
 	{
 		#Perfomance - экономит доли миллисекунды за счет отуствия постоянного обращение к свойствам объекта
-		$object_key = &$this->object->key;
-		$map_id = &$this->object->map_id;
+		$object_key = $this->object->key;
+		$map_id = $this->object->map_id;
 			
 		if(World::isset($object_key) && Block::$components && Block::$components!=$object_key)
 			throw new Error('Стоит запрет на изменение компонентов '.(is_string(Block::$components)?'других существ':'любого существа').' воизбежание зациклевания');
