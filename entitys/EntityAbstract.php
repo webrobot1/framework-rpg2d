@@ -280,7 +280,7 @@ abstract class EntityAbstract
 					if(Block::$positions)
 						throw new Error('Стоит запрет на изменение координат во избежание зацикливание');
 					
-					if(is_a($value, Position::class))
+					if(is_a($value, Position::class) && !World::isRemove($this->key))
 					{
 						// если мы меняем position проверим есть ли песочница при запуске смены координат
 						$old_position = clone $this->$key;
@@ -302,7 +302,8 @@ abstract class EntityAbstract
 						$this->setChanges([$coord=>$coord_value]);
 					}
 
-					if(is_a($value, Position::class))
+					// если существо под удалением ничего уже не меняем ему
+					if(is_a($value, Position::class) && !World::isRemove($this->key))
 					{
 						World::addPosition($this->key, $old_position);
 					}
