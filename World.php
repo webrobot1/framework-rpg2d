@@ -8,14 +8,36 @@ abstract class World
 	private static array $_entitys 		= array();				// коллеция существ
 	
 	private static array $_codes 		= array();				// код срабатываемый при загрузки сущеностей
+	private static Closure $_position_trigger;					// код срабатываемый при смене позиции
+		
 	private static array $_positions 	= array();				// что бы не перебирать ВСЕ объекты методом filter - сделаем матрицу где ключ - позиция объекта и перебираем только нужные		
-
 	private static array $_remove = array();					// массив существ к удалению (сразу удалять нельзя из масива существ тк надо их изменения собрать еще)
+	
 
 	private function __construct(){}
 
-	public static function init(array $list)
+	// добавить код который сработает на сущность 
+	//	при доблавении или удалении
+	//	при смене ее координат - этот метод запускается при старте game Server передавая в песочницу этот код который берет из базы в админ панели записанный
+	public static function init(array $list, array $info)
 	{
+		if(APP_DEBUG)
+			PHP::log('Инициализация кода смены позиций');
+			
+		if(!empty($info['code']))
+		{
+			try
+			{
+				static::$_position_trigger = eval('return static function(EntityAbstract $object, ?Position $old = null):void{
+					'.$info['code'].'  
+				};');	
+			}
+			catch(Throwable $ex)
+			{
+				throw new Error('code(position): Ошибка компиляции кода изменения позиции '.$ex);
+			}				
+		}
+		
 		if(APP_DEBUG)
 			PHP::log('Инициализация типов и кода добавления/удаления существ');
 	
@@ -77,9 +99,6 @@ abstract class World
 				// при добавлении на карту (не путать с временем созданием сущности) тригернем компоненты (будто они все изменили значения что бы сработал их код пользовательский). именно тригер а не перезапись одного и того же
 				// именно так передаем значение тк другие компоненты могли уже его поменять и мы не сможем сравнить по ним входим ли в игру сейчас
 				foreach($entity->components->keys() as $name) $entity->components->trigger($name, $entity->components->get($name));
-				
-				// это вызовет триггер кода смены позиций 
-				static::$_entitys[$entity->key]->position->trigger();	
 				
 				if(!empty(static::$_codes[$entity->type]['in']))
 				{
@@ -188,20 +207,55 @@ abstract class World
 	}
 	
 	// в матрице существа хранятся в клетках размером с тайл (1х1 в системе координат) хотя ходить могут и на пол клетки и на полторы и тд
-	public static function addPosition(string $key)
+	public static function addPosition(string $key, Position $old_value = null)
 	{
 		if(!$entity = static::$_entitys[$key])
 			throw new Error('Сущности '.$key.' не найдено для доблавения ее в матрицу позиций');
 		
-		static::$_positions[static::$_entitys[$key]->position->tile()][$key] = $key;			
-	}		
+		// метод addPosition может запускаться 	только при доблавлении на карту существа из текущего класса и при смене позиций в EntityAbstract::__set
+		// но проверка эта запускается в режиме отладки
+        if
+        (
+			APP_DEBUG 
+				&&
+			(
+				(!$trace = debug_backtrace(!DEBUG_BACKTRACE_PROVIDE_OBJECT | DEBUG_BACKTRACE_IGNORE_ARGS, 2)) 
+					|| 
+				(($trace[1]['class']!=static::class || $trace[1]['function']!='add') && ($trace[1]['class']!=EntityAbstract::class || $trace[1]['function']!='__set'))
+			)
+        )
+            throw new Error('Запуск кода смены позиции можно лишь ишь при добавлении существа в World или при изменении данных '.print_r($trace, true));
+			
+		// это должно быть именно тут , не в Position (тк метод update может вызываться принудительно минуя свойство ->position)
+		if($old_value)
+			static::removePosition($key, $old_value);
+		
+		static::$_positions[$entity->position->tile()][$key] = $key;
+
+		// это вызовет триггер кода смены позиций 
+		if($entity->map_id == MAP_ID && !empty(static::$_position_trigger) && !static::isRemove($key))
+		{
+			if(APP_DEBUG)
+				$entity->log('запустим триггер песочницы изменения позиции');
+			
+			try
+			{
+				$recover = Block::current();
+				Block::$positions = true;			// запрет менять координаты
+				Block::$objects = true;				// запрет добавление объектов
+			
+				call_user_func(static::$_position_trigger, $entity, $old_value);
+			}
+			finally
+			{
+				Block::recover($recover);	
+			}		
+		}	
+	}
 	
-	public static function removePosition(string $key)
+	private static function removePosition(string $key, Position $old_value)
 	{
-		if(!$entity = static::$_entitys[$key])
-			throw new Error('Сущности '.$key.' не найдено для удаления ее из матрицы позиций');
-	
-		$tile = $entity->position->tile();
+		$tile = $old_value->tile();
 		if(isset(static::$_positions[$tile][$key]))
 		{
 			unset(static::$_positions[$tile][$key]);		
@@ -294,7 +348,7 @@ abstract class World
 					}
 					
 					unset(static::$_remove[$key]);
-					static::removePosition($key);
+					static::removePosition($key, static::$_entitys[$key]->position);
 					
 					static::$_entitys[$key]->__destruct();
 

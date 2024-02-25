@@ -29,9 +29,10 @@ abstract class IPosition
 			throw new Error('При создании класса '.static::class.' указания существа не указаны ни кординаты y');		
 		else
 		{
-			$this->_coords['x'] = round($x, POSITION_PRECISION);
-			$this->_coords['y'] = round($y, POSITION_PRECISION);
-			$this->_coords['z'] = (!empty($z)?round($z, POSITION_PRECISION):0);
+			// что бы была проверка на -0 и round
+			self::__set('x', $x);
+			self::__set('y', $y);
+			self::__set('z', (!empty($z)?$z:0));
 		}
 	}
 	
@@ -130,10 +131,7 @@ abstract class IPosition
 				{
 					$value = $this->_coords[$key];
 				}
-				
-				if($value == -0)
-					$value = 0;
-			
+
 				return $value; 
 			break;		
 			default:
@@ -151,22 +149,20 @@ abstract class IPosition
 			case 'z':
 				if(!empty($this->object))
 				{
-					// при записи новых координат существ с друго локации пересчиытваем их в координаты его родительской карты
-					if($key!='z' && $this->object->map_id != MAP_ID)
-					{
-						$position = ['x'=>null, 'y'=>null, 'z'=>null];
-						$position[$key] = &$value;
-					
-						Map2D::encode2dCoord($position['x'], $position['y'], MAP_ID, $this->object->map_id);
-					}
-					$this->object->$key = $value;
+					throw new Error('Нельзя менять координаты класса '.static::class.' по отдельности ('.$x.'='.$value.'), объект - '.$this->object->key);
 				}
 				else
-					$this->_coords[$key] = $value;
+				{	
+					// Бывает такое в PHP, в объекте (код выше) уже исправлено а напрямую тут исправим
+					if($value == -0)
+						$value = 0;
+			
+					$this->_coords[$key] = round($value, POSITION_PRECISION);
+				}
 			break;
 			
 			default:
-				throw new Error('поле '. $key.' нельзя изменить в классе '.static::class);
+				throw new Error('поле '. $key.' нельзя изменить в классе '.static::class.', объект - '.$this->object->key);
 			break;	
 		}
 	}

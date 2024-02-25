@@ -1,29 +1,6 @@
 <?php
 class Position extends IPosition
 {	
-	private static Closure $_position_trigger;
-			
-	// добавить код который сработает на сущность при смене ее координат - этот метод запускается при старте game Server передавая в песочницу этот код который берет из базы в админ панели записанный
-	public static function init(array $info)
-	{
-		if(APP_DEBUG)
-			PHP::log('Инициализация кода смены позиций');
-			
-		if(!empty($info['code']))
-		{
-			try
-			{
-				static::$_position_trigger = eval('return static function(EntityAbstract $object, array $old):void{
-					'.$info['code'].'  
-				};');	
-			}
-			catch(Throwable $ex)
-			{
-				throw new Error('code(position): Ошибка компиляции кода изменения позиции '.$ex);
-			}				
-		}
-	}	
-	
 	// округляет то единицы ( актуально в тайловых картах )
 	public function round(): Position
     {
@@ -170,66 +147,4 @@ class Position extends IPosition
     {
 		return $this->round()->__toString();	
 	}	
-	
-	public function __set(string $key, float $value):void
-	{
-		if(!empty($this->object))
-		{		
-			if(Block::$positions)
-				throw new Error('Стоит запрет на изменение координат во избежание зацикливание');		
-		
-			// если мы меняем position проверим есть ли песочница при запуске смены координат
-			if($this->object->map_id == MAP_ID && !empty(static::$_position_trigger))
-			{
-				$old_value = [$key=>$this->__get($key)];
-			}
-			
-			parent::__set($key, $value);
-
-			if(!empty(static::$_position_trigger) && $this->object->map_id == MAP_ID)
-			{
-				$this->trigger($old_value);
-			}
-		}
-		else
-			parent::__set($key, $value);
-	}
-	
-	// просто запустить триггер при смене значения или как только сущность появляется на сцене (World->add)
-	public function trigger(array $old_value = array())
-	{
-		if($this->object->map_id != MAP_ID)
-			throw new Error('Нельзя создавать триггер запуска кода изменении позиций существа с другой локации ('.$this->object->map_id.') , где он должен выполнятся');
-
-		if
-		(
-			(!$trace = debug_backtrace(!DEBUG_BACKTRACE_PROVIDE_OBJECT | DEBUG_BACKTRACE_IGNORE_ARGS, 2)) 
-				|| 
-			(($trace[1]['class']!=World::class || $trace[1]['function']!='add') && ($trace[1]['class']!=static::class || $trace[1]['function']!='__set'))
-		)
-			throw new Error('Запуск кода смены позиции можно лишь ишь при добавлении существа в World или при изменении данных '.print_r($trace, true));
-			
-		// при добавлении в объекты и если изменилось значение - вызовем тригер 
-		if(!empty(static::$_position_trigger))
-		{	
-			if(!World::isset($this->object->key))
-				throw new Error('Сущность '.$this->object->key.' не была добавлена в мировое пространтство для вызова песочниц триггера компонентов');
-			
-			if(APP_DEBUG)
-				$this->object->log('запустим триггер песочницы изменения позиции');
-			
-			try
-			{
-				$recover = Block::current();
-				Block::$positions = true;			// запрет менять координаты
-				Block::$objects = true;				// запрет добавление объектов
-			
-				call_user_func(static::$_position_trigger, $this->object, $old_value);
-			}
-			finally
-			{
-				Block::recover($recover);	
-			}
-		}	
-	}
 }

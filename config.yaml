@@ -12,10 +12,9 @@ init: |-
     
     Components::init({components});
     Events::init({events});
-    Position::init({positions});
     Map2D::init({sides}, {maps});
     
-    World::init({world});
+    World::init({world}, {positions});
     
     foreach({entitys} as $type=>$entitys)
     {

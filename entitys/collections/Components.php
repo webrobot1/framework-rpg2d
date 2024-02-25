@@ -169,7 +169,7 @@ class Components extends AbstractCollection
 		if($this->object->map_id != MAP_ID)
 			throw new Error('Нельзя создавать триггер на изменении компонента существа с другой локации ('.$this->object->map_id.') , где он должен выполнятся');
 		
-		if((!$trace = debug_backtrace(!DEBUG_BACKTRACE_PROVIDE_OBJECT | DEBUG_BACKTRACE_IGNORE_ARGS, 2)) || $trace[1]['function']!='add' || ($trace[1]['class']!=World::class && $trace[1]['class']!=static::class))
+		if(APP_DEBUG && ((!$trace = debug_backtrace(!DEBUG_BACKTRACE_PROVIDE_OBJECT | DEBUG_BACKTRACE_IGNORE_ARGS, 2)) || $trace[1]['function']!='add' || ($trace[1]['class']!=World::class && $trace[1]['class']!=static::class)))
 				throw new Error('Запуск кода смены компонента можно лишь ишь при добавлении существа в World или при изменении данных '.print_r($trace, true));
 			
 		// при добавлении в объекты и если изменилось значение - вызовем тригер 

@@ -99,7 +99,7 @@ class EventGroup
 	// from_client - команд пришла от игрока и должна ставится в очередь не завиимо идет ли паралельно какой то процесс заблокироващий добавление событий (например таймаут паралельно просчитывается в другом потоке программы)
 	public function update(string $action, array $data, bool $from_client = false):static
 	{
-		if(debug_backtrace(!DEBUG_BACKTRACE_PROVIDE_OBJECT | DEBUG_BACKTRACE_IGNORE_ARGS, 2)[1]['class'] != Events::class)
+		if(APP_DEBUG && debug_backtrace(!DEBUG_BACKTRACE_PROVIDE_OBJECT | DEBUG_BACKTRACE_IGNORE_ARGS, 2)[1]['class'] != Events::class)
             throw new Error('Добавление возможно лишь через '.Events::class);
 		
 		if(!$action)

@@ -29,11 +29,6 @@ final class Forward extends IPosition
 		}
 	}
 
-	public function __set(string $key, float $value):void
-	{
-		throw new Error('запрещено менять координаты вектора направления отдельно - используйте полное переопределение классом Forward с дальнейшей проверкой соответсвие вектора нормализированному состоянию');
-	}
-	
 	public function __get(string $key):float
 	{
 		switch($key)

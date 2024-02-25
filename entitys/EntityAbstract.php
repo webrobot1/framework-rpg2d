@@ -93,12 +93,7 @@ abstract class EntityAbstract
 			$this->map_id = $map_id;
 		
 		if($remote_update)
-		{
-			if((!$trace = debug_backtrace(!DEBUG_BACKTRACE_PROVIDE_OBJECT | DEBUG_BACKTRACE_IGNORE_ARGS, 3)) || empty($trace[2]) || ($trace[2]['class'] != RemoteCommand::class))
-				throw new Error('параметр существа указывающий что существо обновляется пакетом с удаленной локации нельзя указать вручную при создании существа '.print_r($trace, true));
-			
-			$this->remote_update = $remote_update;
-		}
+			$this->__set('remote_update', $remote_update);
 		
 		if(!$action)
 			$this->action = SystemActionEnum::ACTION_LOAD;
@@ -142,7 +137,7 @@ abstract class EntityAbstract
 				// todo сделать позицию спавна игрока по умолчанию
 				if($new_position = array_keys($tiles)[rand(0, count($tiles)-1)])
 				{
-					$this->log('Тайл '.$tile.' не доступен на карте '.$this->map_id.', установим случайный '.$new_position);
+					$this->warning('Тайл '.$tile.' не доступен на карте '.$this->map_id.', установим случайный '.$new_position);
 				
 					$explode = explode(Position::DELIMETR, $new_position);
 					$this->x = $explode[0];                                                                                    
@@ -180,7 +175,7 @@ abstract class EntityAbstract
 		$this->events = new Events($this, $events);
 		$this->components = new Components($this, $components);			
 	}	
-		
+	
 	// какие колонки выводить в методе toArray и которые можно изменить из вне класса
 	public static function columns():array
 	{
@@ -195,6 +190,7 @@ abstract class EntityAbstract
 			'y'=>true,							
 			'z'=>true,
 			
+			// эти три поля меняются по отдельности только существам с другой локации, для текущих нужно создавать объект IPosition заного 
 			'forward_x'=>true,							
 			'forward_y'=>true,	
 			'forward_z'=>true,	
@@ -247,7 +243,12 @@ abstract class EntityAbstract
 		
 		if($key == 'remote_update')
 		{
-			if((!$trace = debug_backtrace(!DEBUG_BACKTRACE_PROVIDE_OBJECT | DEBUG_BACKTRACE_IGNORE_ARGS, 2)) || $trace[1]['class'] != RemoteCommand::class)
+			if(
+				APP_DEBUG 
+					&&
+				// может быть указано либо при создании существа через RemoteCommand->...->EntityAbstract->__construct->__set или RemoteCommand->EntityAbstract->__set
+				((!$trace = debug_backtrace(!DEBUG_BACKTRACE_PROVIDE_OBJECT | DEBUG_BACKTRACE_IGNORE_ARGS, 4)) || ($trace[1]['class'] != RemoteCommand::class && $trace[3]['class'] != RemoteCommand::class))
+			)
 				throw new Error('параметр существа указывающий что существо обновляется пакетом с удаленной локации нельзя менять вручную '.print_r($trace, true));
 		    
 			if(MAP_ID == $map_id)
@@ -269,48 +270,68 @@ abstract class EntityAbstract
 				if(APP_DEBUG)
 					$this->log('изменение поля '.$key.' на '.$value.($remote_update?' в режиме синхронизации локации с '.$map_id:''));	
 				
+				// изменение координат через привыоение ->position = new Position(...)
 				if(isset($this->position_columns()[$key]))
 				{
-					foreach(['x', 'y', 'z'] as $position)
+					// пакеты с position или forward не могут приходить из вне и меняться
+					if($map_id != MAP_ID)
+						throw new Error('Данные поля '.$key.' не могут приходить для существа с другой локации из вне');
+					
+					if(Block::$positions)
+						throw new Error('Стоит запрет на изменение координат во избежание зацикливание');
+					
+					if(is_a($value, Position::class))
+					{
+						// если мы меняем position проверим есть ли песочница при запуске смены координат
+						$old_position = clone $this->$key;
+					}
+					
+					foreach($value->toArray() as $coord=>$coord_value)
 					{
 						// с forward такой колхоз тк нельзя отдельно менять 
-						if(is_a($value , Forward::class))
+						if(is_a($value, Forward::class))
 						{
-							if(!is_a($value , Forward::class))
-								throw new Error('Значение свойства '.$key.' не является объектом направления движения');
-							
-							$this->__set('forward_'.$position, $value->$position);
+							# Perfomance - что бы не обращаться  раза к свойству сохраним в виде переменной (так быстрее)
+							// Зная что там магический метод вызовем его напрямую
+							$coord = 'forward_'.$coord;
 						}
-						else
-						{
-							if(!is_a($value , Position::class))
-								throw new Error('Значение свойства '.$key.' не является объектом позиции');
-							
-							$this->$key->__set($position, $value->__get($position));		
-						}
-					}	
+						elseif(!is_a($value, Position::class))
+							throw new Error('Значение свойства '.$key.' не является объектом позиции');
+						
+						$this->$coord = $coord_value;
+						$this->setChanges([$coord=>$coord_value]);
+					}
+
+					if(is_a($value, Position::class))
+					{
+						World::addPosition($this->key, $old_position);
+					}
 				}
 				else
 				{
 					// работа с бесщовным миром
 					switch($key)
 					{
-						// если мы на текущей карте и меняются x и y проверим не ушли ли мы на смежную карту
+						// напрямую смена координат существам с другой лкоации (с текущей так нельзя только через new Position и new Forward)
 						case 'x':
 						case 'y':
 						case 'z':
-								// это должно быть именно тут , не в Position (тк метод update может вызываться принудительно минуя свойство ->position)
-								World::removePosition($this->key);
-									$this->$key = $value;
-									
-									// если пакет с удаленного мира не рассылаем никаких изменений
-									if($map_id == MAP_ID)
-										$this->setChanges([$key=>$value]);
-									
-								World::addPosition($this->key);
-								
-							// именно выходим из функции, не break!
-						return;					
+							if(MAP_ID == $map_id) 
+								throw new Error('Нельзя напрямую менять параметры ('.$key.') существу '.$this->key.' с текущей локации (используйте новый экземпляр Position)');
+							
+							// Бывает такое в PHP
+							if($value == -0)
+								$value = 0;
+							
+							$value = round($value, POSITION_PRECISION);
+							
+							// это должно быть именно тут , не в Position (тк метод update может вызываться принудительно минуя свойство ->position)
+							$old_position = clone $this->position;
+							
+							$this->$key = $value;
+							World::addPosition($this->key, $old_position);
+							// именно выходим из функции, не break тк мы уже установили координаты , а не установить не можем тут тк addPosition  требует перед ним установку их!
+						return;	
 						
 						// если мы на текущей карте и меняются x и y проверим не ушли ли мы на смежную карту
 						case 'forward_x':
@@ -318,6 +339,11 @@ abstract class EntityAbstract
 						case 'forward_z':
 							if($value<-1 || $value>1)
 								throw new Error('Значение поля '.$key.' '.$value.' превысило единицу');
+							
+							if(MAP_ID == $map_id) 
+								throw new Error('Нельзя напрямую менять параметры ('.$key.') существу '.$this->key.' с текущей локации (используйте новый экземпляр Forward)');
+							
+							$value = round($value, POSITION_PRECISION);
 						break;
 						
 						// если напрямую сменилась карта
@@ -351,6 +377,7 @@ abstract class EntityAbstract
 		else
 			throw new Error('нельзя изменить поле '. $key);
 	}
+	
 	
 	// todo сделать что бы это сразу вносилось в глобальный кеш World для отправки (тк там и есть данные удаления сущнсоти котоыре не снять уже после самого ее удаления тк нет $this)
 	public function setChanges(array $changes, EntityChangeTypeEnum $type = EntityChangeTypeEnum::All)
@@ -455,13 +482,14 @@ abstract class EntityAbstract
 		
 			if($this->map_id == MAP_ID && Map2D::sides() && !World::isRemove($this->key))
 			{
-				if(isset($changes[$change_type]) && (isset($changes[$change_type]['x']) || isset($changes[$change_type]['y'])) && (empty($changes[$change_type]['map_id']) || $changes[$change_type]['map_id'] == MAP_ID))
+				// нет смысла проверять в на empty($changes[$change_type]['map_id'] тк если менялась карта World::isRemove  будет true и сюда уже не попадет 
+				if(isset($changes[$change_type]) && (isset($changes[$change_type]['x']) || isset($changes[$change_type]['y'])))
 				{
 					// если сменилась карта дополучим новые координаты и ее саму
-					if($map_id = $this->checkLeave())
+					if($new_map_id = $this->checkLeave())
 					{
 						if(APP_DEBUG)
-							$this->log('запросим дополнительные изменения в связи с '.($map_id == MAP_ID?'выходом за границы карты (недостаточного для перехода на другую локацию)':'переходом на новую карту'));
+							$this->log('запросим дополнительные изменения в связи с '.($new_map_id == MAP_ID?'выходом за границы карты (недостаточного для перехода на другую локацию)':'переходом на новую карту'));
 						
 						$changes = array_replace_recursive($changes, $this->_changes);	
 						$this->_changes = array();							
@@ -473,7 +501,8 @@ abstract class EntityAbstract
 		return $changes;
 	}
 	
-	// если мы вышли за пределы текущей карты сервера - нам пересчитывает коордираны на новой и передаст их с новой картой 
+	// проверка на уход с карты осуществляется в самом конце, после получения изменений существа (тк в процессе кадра может меняться и координаты и карта - например существо толкнут за пределы карты карты но вызовется телепор и все в одном событие кадра)
+	// +  и долго при каждой смене позиции проверять поэтому тут разово
 	// todo можно рекурсивно вызывать ее проверяя и сдвигая на соседние карты существо
 	protected final function checkLeave():?int
 	{
@@ -501,7 +530,7 @@ abstract class EntityAbstract
 			{
 				if($map_id == MAP_ID) continue;
 				// находим карту которая левее текущей и ее верхяя (начальная) точка выше (т.е больше в числовом значении по оси y) текущей позия  y существа и ее нижняя точка так же ниже позиции (те захватывает наше существо)
-				if($coord['x']==$sides[MAP_ID]['x']- Map2D::getInfo($map_id)['width'] && $coord['y']>=$y && $coord['y'] - (Map2D::getInfo($map_id)['height']-1)<=$y)
+				if($coord['x']==$sides[MAP_ID]['x'] - Map2D::getInfo($map_id)['width'] && $coord['y']>=$y && $coord['y'] - (Map2D::getInfo($map_id)['height']-1)<=$y)
 				{
 					$new_map_id = $map_id;
 					break;
@@ -517,7 +546,7 @@ abstract class EntityAbstract
 			foreach($sides as $map_id=>$coord)
 			{
 				if($map_id == MAP_ID) continue;
-				if($coord['x']==$sides[MAP_ID]['x']+Map2D::getInfo(MAP_ID)['width'] && $coord['y']>=$y && $coord['y'] - (Map2D::getInfo($map_id)['height']-1)<=$y)
+				if($coord['x']==$sides[MAP_ID]['x'] + Map2D::getInfo(MAP_ID)['width'] && $coord['y']>=$y && $coord['y'] - (Map2D::getInfo($map_id)['height']-1)<=$y)
 				{
 					$new_map_id = $map_id;
 					break;
@@ -549,7 +578,7 @@ abstract class EntityAbstract
 			foreach($sides as $map_id=>$coord)
 			{
 				if($map_id == MAP_ID) continue;
-				if($coord['y']==$sides[MAP_ID]['y']+Map2D::getInfo(MAP_ID)['height'] && $coord['x']<=$x && $coord['x'] + (Map2D::getInfo($map_id)['width']-1)<=$x)
+				if($coord['y']==$sides[MAP_ID]['y'] + Map2D::getInfo(MAP_ID)['height'] && $coord['x']<=$x && $coord['x'] + (Map2D::getInfo($map_id)['width']-1)<=$x)
 				{
 					$new_map_id = $map_id;
 					break;
@@ -559,7 +588,7 @@ abstract class EntityAbstract
 			if(empty($new_map_id))
 				throw new Error($this->key.': Координаты существа ('.$this_x.', '.$this_y.') вышли по y вниз за пределы текущей карты но не найдено соответвующей карты '.print_r($sides, true));	
 		}
-
+					
 		if($new_map_id)
 		{
 			Map2D::encode2dCoord($this_x, $this_y, MAP_ID, $new_map_id);
@@ -567,11 +596,9 @@ abstract class EntityAbstract
 			if(APP_DEBUG)
 				$this->log('ушел на карту '.$new_map_id.' ('.$this_x.', '.$this_y.') по результатам проверки координат');
 			
-			$this->__set('map_id', $new_map_id);
-			$this->__set('x', $this_x);
-			$this->__set('y', $this_y);			
-		}
-
+			$this->__set('map_id', $new_map_id);	
+		}	
+		
 		if($this_x<0)
 		{			
 			if(ceil($this_x) == 0)
@@ -582,7 +609,7 @@ abstract class EntityAbstract
 				if(APP_DEBUG)
 					$this->log('скорректируем координаты x ('.$this_x.') на 0 тк они выходят за границу карты');
 			
-				$this->__set('x', 0);
+				$this_x = 0;
 			}
 			else
 				throw new Error($this->key.': при проверке координат '.($new_map_id?'и переходе на карту'.$new_map_id:'').' x ('.$this_x.') стало меньше 0 что не возможно для родительской локации тк отсчет идет от 0 и не может быть меньше '.($new_map_id?'в том числе на новой карте':'без смены карты'));
@@ -598,16 +625,19 @@ abstract class EntityAbstract
 				if(APP_DEBUG)
 					$this->log('скорректируем координаты y ('.$this_y.') на 0 тк они выходят за границу карты');
 				
-				$this->__set('y', 0);		
+				$this_y = 0;	
 			}
 			else
 				throw new Error($this->key.': при проверке координат '.($new_map_id?'и переходе на карту'.$new_map_id:'').' y ('.$this_y.') стало больше 0 что не возможно для родительской локации тк отсчет идет от 0 и не может быть больше (выше края карты) '.($new_map_id?'в том числе на новой карте':'без смены карты'));
-		}	
-		
+		}		
+					
+		// тригер изменения позиции не вызовется уже тк существо уже помечено на удаление при смене map_id а только запишуться setChanges в EntityAbsstract
+		if($new_map_id)
+			$this->__set('position', new Position($this_x, $this_y, $this->z));	
+				
 		return $new_map_id;		
 	}
 	
-
 	abstract protected static function getType():string;	
 
 	// Возвращает обе части для ключа Redis
