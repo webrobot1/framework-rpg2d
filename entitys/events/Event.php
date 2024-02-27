@@ -12,4 +12,9 @@ class Event
 		if(empty($action))
 			throw new Error('При добавления собятия поле action не может быть пустым');	
 	}
+	
+	function __clone():void
+	{
+		throw new Error('Клонирование объекта события запрещено');
+	}	
 }

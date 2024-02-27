@@ -179,15 +179,7 @@ abstract class IPosition
 	
 	function __clone():void
 	{
-		if(!empty($this->object))
-		{
-			$position = $this->toArray();
-			$this->object = null;
-			
-			$this->_coords['x'] = $position['x'];
-			$this->_coords['y'] = $position['y'];
-			$this->_coords['z'] = $position['z'];
-		}
+		throw new Error('Клонирование объекта позиций запрещено');
 	}
 	
 	// если этого не делать будет утечка памяти при удалении существа с карты тк ссылка останется тут

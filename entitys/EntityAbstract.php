@@ -280,10 +280,11 @@ abstract class EntityAbstract
 					if(Block::$positions)
 						throw new Error('Стоит запрет на изменение координат во избежание зацикливание');
 					
-					if(is_a($value, Position::class) && !World::isRemove($this->key))
+					if(is_a($value, Position::class))
 					{
 						// если мы меняем position проверим есть ли песочница при запуске смены координат
-						$old_position = clone $this->$key;
+						// именно тк что бы посчиталась правильная позиция ровная с учетом положения
+						$old_position = $this->$key->round();
 					}
 					
 					foreach($value->toArray() as $coord=>$coord_value)
@@ -303,7 +304,7 @@ abstract class EntityAbstract
 					}
 
 					// если существо под удалением ничего уже не меняем ему
-					if(is_a($value, Position::class) && !World::isRemove($this->key))
+					if(is_a($value, Position::class))
 					{
 						World::addPosition($this->key, $old_position);
 					}
@@ -327,7 +328,7 @@ abstract class EntityAbstract
 							$value = round($value, POSITION_PRECISION);
 							
 							// это должно быть именно тут , не в Position (тк метод update может вызываться принудительно минуя свойство ->position)
-							$old_position = clone $this->position;
+							$old_position = $this->position->round();
 							
 							$this->$key = $value;
 							World::addPosition($this->key, $old_position);
@@ -710,6 +711,11 @@ abstract class EntityAbstract
 	{
 		$comment = $this->key.($this->map_id != MAP_ID?' (с локации '.$this->map_id.')':'').': '.(is_array($comment)?print_r($comment, true):$comment);
 		PHP::warning($comment);
+	}
+	
+	function __clone():void
+	{
+		throw new Error('Клонирование объекта существа запрещено');
 	}
 	
 	// если этого не делать будет утечка памяти при удалении существа с карты тк ссылка останется тут	

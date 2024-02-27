@@ -50,6 +50,11 @@ abstract class AbstractCollection
     {
         return count($this->all());
     }
+		
+	function __clone():void
+	{
+		throw new Error('Клонирование коллекций запрещено');
+	}
 	
 	final public function __toString() 
     {

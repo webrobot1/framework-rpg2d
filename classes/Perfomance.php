@@ -51,7 +51,7 @@ abstract class Perfomance
 			{
 				ksort($logs);				
 				$start = hrtime(true);
-				PHP::perfomance(implode(PHP_EOL, $logs));
+				PHP::perfomance(PHP_EOL.implode(PHP_EOL, $logs));
 	
 				static::$_abs["Sandbox      | отправка в WebSocket всех perfomance мс."][] = round((hrtime(true) - $start)/1e+6, 3);					
 			}	

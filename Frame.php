@@ -88,14 +88,14 @@ abstract class Frame
 					catch(Exception $ex)
 					{
 						// исключения типа Exception у игроков с текущей карты не рушим сервер, а отключам игроков
-						if($entity->map_id == MAP_ID && $entity->type == EntityTypeEnum::Players->value)
+						if(!is_a($ex, ErrorException::class) && $entity->map_id == MAP_ID && $entity->type == EntityTypeEnum::Players->value)
 						{
 							$entity->warning('Ошибка выполнения события '.$group_name.'/'.$action.', сервер продолжает работу '.$ex);
-							$entity->send(['error'=>$ex->getMessage()]);
+							$entity->send(['error'=>'Ошибка выполнения серверного события '.$group_name.'/'.$action]);
 							World::remove($entity->key);						
 						}
 						else
-							trigger_error($ex, E_USER_ERROR);
+							trigger_error($ex->getMessage(), E_USER_ERROR);
 					}
 					finally
 					{

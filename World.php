@@ -41,9 +41,9 @@ abstract class World
 		if(APP_DEBUG)
 			PHP::log('Инициализация типов и кода добавления/удаления существ');
 	
-		// Предупреждения в отличие от стандартного поведения в PHP теперь вызывают исключения Exception
+		// Предупреждения в отличие от стандартного поведения в PHP теперь вызывают исключения EventException
 		// тк для игры предупреждения не допустимы - они пишутся в лог занимают время за сам факт того что они есть
-		// плюс расшифровка их логов если оставить из стандартно для всяких предупреждений из eval затруднительна , а для Exception уже есть решения
+		// плюс расшифровка их логов если оставить из стандартно для всяких предупреждений из eval затруднительна , а для EventException уже есть решения
 		set_error_handler(function($errno, $errstr, $errfile, $errline)
 		{
 			if($errno != 0)
@@ -155,7 +155,7 @@ abstract class World
 				}
 				
 				if(APP_DEBUG)
-					PHP::log('добавление в очередь на удаление сущености '.$key.($entity->map_id!=MAP_ID?' с другой карты':'').($new_map?' по причине перехода на новую карту '.$new_map:''));
+					$entity->log('добавление в очередь на удаление сущености '.($entity->map_id!=MAP_ID?' с другой карты':'').($new_map?' по причине перехода на новую карту '.$new_map:''));
 				 
 				static::$_remove[$key] = $new_map;
 
@@ -212,25 +212,28 @@ abstract class World
 		if(!$entity = static::$_entitys[$key])
 			throw new Error('Сущности '.$key.' не найдено для доблавения ее в матрицу позиций');
 		
-		// метод addPosition может запускаться 	только при доблавлении на карту существа из текущего класса и при смене позиций в EntityAbstract::__set
-		// но проверка эта запускается в режиме отладки
-        if
-        (
-			APP_DEBUG 
-				&&
+		$tile = $entity->position->tile();
+		
+		if(APP_DEBUG)
+		{
+			$entity->log('добавление на позицию '.$tile);
+			
+			// метод addPosition может запускаться 	только при доблавлении на карту существа из текущего класса и при смене позиций в EntityAbstract::__set
+			// но проверка эта запускается в режиме отладки
+			if
 			(
 				(!$trace = debug_backtrace(!DEBUG_BACKTRACE_PROVIDE_OBJECT | DEBUG_BACKTRACE_IGNORE_ARGS, 2)) 
 					|| 
 				(($trace[1]['class']!=static::class || $trace[1]['function']!='add') && ($trace[1]['class']!=EntityAbstract::class || $trace[1]['function']!='__set'))
 			)
-        )
-            throw new Error('Запуск кода смены позиции можно лишь ишь при добавлении существа в World или при изменении данных '.print_r($trace, true));
-			
+				throw new Error('Запуск кода смены позиции можно лишь ишь при добавлении существа в World или при изменении данных '.print_r($trace, true));
+		}
+		
 		// это должно быть именно тут , не в Position (тк метод update может вызываться принудительно минуя свойство ->position)
 		if($old_value)
 			static::removePosition($key, $old_value);
 		
-		static::$_positions[$entity->position->tile()][$key] = $key;
+		static::$_positions[$tile][$key] = $key;
 
 		// это вызовет триггер кода смены позиций 
 		if($entity->map_id == MAP_ID && !empty(static::$_position_trigger) && !static::isRemove($key))
@@ -255,7 +258,14 @@ abstract class World
 	
 	private static function removePosition(string $key, Position $old_value)
 	{
+		if(!$entity = static::$_entitys[$key])
+			throw new Error('Сущности '.$key.' не найдено для удаления ее из матрицы позиций');
+		
 		$tile = $old_value->tile();
+		
+		if(APP_DEBUG)
+			$entity->log('удаление с позиции '.$tile);
+		
 		if(isset(static::$_positions[$tile][$key]))
 		{
 			unset(static::$_positions[$tile][$key]);		
@@ -285,6 +295,9 @@ abstract class World
 				{
 					foreach(static::$_positions[$new_position] as $key)
 					{
+						if(!isset(static::$_entitys[$key]))
+							throw new Error($key.': Существо отмечено на локации '.$new_position.' , но отсутвует в коллекции');
+						
 						if($filter)
 						{ 
 							$return = $filter(static::get($key));
