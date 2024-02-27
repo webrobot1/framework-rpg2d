@@ -140,6 +140,9 @@ class Events extends AbstractCollection
 		
 		foreach($list as $group_name=>&$group)
 		{
+			// это вируатльное поле, нужно нам для понмиания есть ли в группе хоть одно публичное событие (используется в EventGroup)
+			$group['isPublic'] = false;
+			
 			if(!empty($group['code']))
 			{
 				if(APP_DEBUG)
@@ -162,6 +165,10 @@ class Events extends AbstractCollection
 			{
 				if(APP_DEBUG)
 					PHP::log('Инициализация функции группы '.$group_name.' события '.$event_name);
+				
+				// если хоть одно событие публичное  - группа события помечается как публичная
+				if($event['isPublic'])
+					$group['isPublic'] = true;
 				
 				// создадим из текстовой версии кода которая нам пришла замыкание которое можно будет вызывать при сменен компонет а
 				try
