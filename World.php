@@ -91,15 +91,12 @@ abstract class World
 		
 		if($entity->map_id==MAP_ID || $entity->remote_update)
 		{		
-			static::$_entitys[$entity->key] = $entity;
-			static::addPosition($entity->key);
-			
 			if($entity->map_id == MAP_ID)
 			{
 				// при добавлении на карту (не путать с временем созданием сущности) тригернем компоненты (будто они все изменили значения что бы сработал их код пользовательский). именно тригер а не перезапись одного и того же
 				// именно так передаем значение тк другие компоненты могли уже его поменять и мы не сможем сравнить по ним входим ли в игру сейчас
 				foreach($entity->components->keys() as $name) $entity->components->trigger($name, $entity->components->get($name));
-				
+
 				if(!empty(static::$_codes[$entity->type]['in']))
 				{
 					try
@@ -117,7 +114,10 @@ abstract class World
 						Block::recover($recover);
 					}
 				}
-			}	
+			}
+
+			static::$_entitys[$entity->key] = $entity;
+			static::addPosition($entity->key);
 		}
 		// если существо для другой локации просто отправим на нее пакет что мы хотим его создать не рассылая ничего
 		else

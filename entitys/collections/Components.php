@@ -71,112 +71,83 @@ class Components extends AbstractCollection
 		if(!$component = @static::$_list[ComponentListEntityTypeEnum::All->value][$key])
 			throw new Error('компонент '.$key.' не найден');
 		
-		static::valid_type(ComponentTypeEnum::from($component['type']), $value, true);
-
 		if (!$this->exists($key)) 
 		{
-			if(isset($component['entitys']) && !isset($component['entitys'][$this->object->type]))
+			if(!isset($component['entitys'][$this->object->type]))
 				throw new Error('компонент '.$key.' не разрешен для сущности '.$object_key.' с типом '.$this->object->type);	
 		}
-		
 		// может так быть: мы на соседнюю локацию шлем увеличение текущих hp (лечение), а существо уже убьют пока идет пакет и будет увеличение HP мертвому существу (как приме). 
 		// Поэтому не давать менять существам на соседних локациях напрямую компоненты. кроме как при создании нового существа
 		elseif($map_id!=MAP_ID && !$this->object->remote_update) 
 			throw new Error('Нельзя менять компоненты созданного существ на другой локации (только при создании или на текущей. в остальном используйте события в которых могут менять в прцоессе выполнения на локации существа)');
 		
+		static::valid_type(ComponentTypeEnum::from($component['type']), $value);
+		
 		// при загрузки и если изменилось значение - пометим что на рассылку всем игроакм данных и вызовем код если он есть
 		// повторная смена занчение на то же самое не вызовет тригер (это важно тк может быть зацикленность)
 		if(!$this->exists($key) || $this->values[$key]!=$value)
 		{
-			$data = ['components'=>[$key=>$value]];		
-			
+			// для существ с другой локации тригер не создаем (он уже вызвался у родной локации) и не рассылаем изменения (тк сами мы их поменять не можем а обновление по существу уже были всем разосланы еще в websocket)
 			if($map_id == MAP_ID)
-			{
+			{		
+				// если объект есть на сцене
+				// мы не можем вызвать иначе тк для тригера нужен объект в тч components заполненный который создасться после создания объекта
+				if(World::isset($object_key))
+				{
+					$new_value = $this->trigger($key, $value);
+					
+					// tclb мы привели к null значение а оно было не null тогда не сохранем
+					if($new_value!==null || $new_value === $value)
+						$value = $this->values[$key] = $new_value;	
+				}
+				else
+					$this->values[$key] = $value;	
+
+				$data = ['components'=>[$key=>$value]];		
+			
 				if($component['isSend'])
 					$this->object->setChanges($data);
 				else
 					$this->object->setChanges($data, EntityChangeTypeEnum::Privates);
-			
-				// если объект есть на сцене
-				if(World::isset($object_key))
-				{
-					$old_value = ($this->exists($key)?$this->values[$key]:null);
-					
-					// строго до setChanges выше тк там проверка на то был ли создан ранее. пересылается в первый раз ВСЕГДА только через load одним пакетом
-					$this->values[$key] = $value;
-					
-					// для существ с другой локации тригер не создаем (он уже вызвался у родной локации)
-					$this->trigger($key, $old_value);					
-				}
-				else
-					$this->values[$key] = $value;
 			}
 			else
-				$this->values[$key] = $value;	// а если нет Object коллекция вызовет код когда добавится объект на сцену (тк в сомент создания сущности ее еще нет на сцене)	
+				$this->values[$key] = $value;	
 			
 			if(APP_DEBUG)
 				$this->object->log('новое значение компонента '.$key.' ('.$component['type'].') сущности '.$object_key.' = '.print_r($value, true));
 		}
 	}
 
-	private static function valid_type(ComponentTypeEnum $type, string|float|array|null &$default_value, bool $json_as_array):void
+	private static function valid_type(ComponentTypeEnum $type, string|float|array $default_value):void
 	{
 		if($type == ComponentTypeEnum::Json)
 		{
-			if($default_value===null)
-			{
-				$default_value = ($json_as_array?array():'[]');
-			}
-				
-			if(is_array($default_value))
-			{
-				// если флаг не стоит то ничего и не делаем
-				if(!$json_as_array)
-					$default_value = json_encode($default_value, JSON_FORCE_OBJECT|JSON_NUMERIC_CHECK|JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);	
-				else
-					return;
-			}
-			// там где подаем строки всегда нужно трансформировать в массив (другого кейса и нет)
-			else
-			{
-				if($default_value!='[]' && (!$default_value = json_decode($default_value, true)))
-				{
-					throw new Error('Не удалось распарсить строку как json');	
-				}	
-			}
+			if(!is_array($default_value))
+				throw new Error('Только массив допустим для присвоения свойства с типом json');	
 		}
 		elseif($type == ComponentTypeEnum::Number)
 		{
-			if($default_value===null)
-				$default_value = 0;
-			
-			elseif(!is_numeric($default_value))
+			if(!is_numeric($default_value))
 				throw new Error('значение по умолчанию компонента должно быть числом тк указан соответсвующий тип');
 		}			
 		elseif($type == ComponentTypeEnum::String)
 		{
-			if($default_value===null)
-				$default_value= '';
-			
 			if(!is_string($default_value))
-				throw new Error('только строка разрешена для значения копонента '.$default_value);	
+				throw new Error('только строка разрешена для значения копонента');	
 		}					
 	}
 	
 	// просто запустить триггер при смене значения или как только сущность появляется на сцене (World->add)
-	public function trigger(string $key, $old_value = null)
+	public function trigger(string $key, $value):mixed
 	{
 		if($this->object->map_id != MAP_ID)
 			throw new Error('Нельзя создавать триггер на изменении компонента существа с другой локации ('.$this->object->map_id.') , где он должен выполнятся');
 		
-		if(APP_DEBUG && ((!$trace = debug_backtrace(!DEBUG_BACKTRACE_PROVIDE_OBJECT | DEBUG_BACKTRACE_IGNORE_ARGS, 2)) || $trace[1]['function']!='add' || ($trace[1]['class']!=World::class && $trace[1]['class']!=static::class)))
-				throw new Error('Запуск кода смены компонента можно лишь ишь при добавлении существа в World или при изменении данных '.print_r($trace, true));
-			
 		// при добавлении в объекты и если изменилось значение - вызовем тригер 
 		if($closure = &static::list()[$key]['closure'])
 		{	
-			if(!World::isset($this->object->key))
-				throw new Error('Сущность '.$this->object->key.' не была добавлена в мировое пространтство для вызова песочниц триггера компонентов');
+			if(APP_DEBUG && ((!$trace = debug_backtrace(!DEBUG_BACKTRACE_PROVIDE_OBJECT | DEBUG_BACKTRACE_IGNORE_ARGS, 2)) || $trace[1]['function']!='add' || ($trace[1]['class']!=World::class && ($trace[1]['class']!=static::class || !World::isset($this->object->key)))))
+				throw new Error('Запуск кода смены компонента можно лишь при добавлении существа в World или при изменении данных уже добавленного '.print_r($trace, true));
 			
 			if(APP_DEBUG)
 				$this->object->log('запустим триггер песочницы компонента '.$key);
@@ -184,13 +155,15 @@ class Components extends AbstractCollection
 			try{			
 				$recover = Block::current();
 				Block::$components = true;																	// запретим менять компоненты , но разрешим вешать события на тригеры значений компонентов
-				$closure($this->object, $old_value);														// передадим старое значение. если захотим вернем его
+				$value = $closure($this->object, $value);													// передадим старое значение. если захотим вернем его (да можно предавать по ссылки но тока в песочнице php, а есть еще и lua и js)
 			}
 			finally
 			{
 				Block::recover($recover);																					// после вернем как было (тк может мы из какого то друого места пришли где были запреты уже, например из зигрузки на карту сущности)	
 			}
 		}	
+		
+		return $value;
 	}
 	
 	final public function privates():array
@@ -240,8 +213,9 @@ class Components extends AbstractCollection
 				try
 				{
 					// не меняйте текстовку ошибки - она парсится в мастер процессе песочницы которая запустила этот процесс
-					$component['closure'] = eval('return static function(EntityAbstract $object, $old_value):void{
-						'.$component['code'].' 						
+					$component['closure'] = eval('return static function(EntityAbstract $object, $value):mixed{
+						'.$component['code'].' 
+						return $value;
 					};');
 				}
 				catch(Throwable $ex)

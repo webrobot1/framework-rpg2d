@@ -17,7 +17,7 @@ class EventGroup
 		#Perfomance - прямая ссылка на свойство убыстрит получение данных X2 (за счет отсутствия постоянного обращение к объекту)
 		$object_type = $this->object->type;
 		
-		if(!empty(Events::list()[$this->name]['entitys']) && !isset(Events::list()[$this->name]['entitys'][$object_type]))
+		if(!isset(Events::list()[$this->name]['entitys'][$object_type]))
 			throw new Error('событие '.$this->name.' не разрешено для '.$object_type);
 	
 		if(APP_DEBUG)

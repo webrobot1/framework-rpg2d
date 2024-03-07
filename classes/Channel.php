@@ -32,7 +32,7 @@ abstract class Channel
 		$data = $entity->toArray();
 
 		if($privates_components = $entity->components->privates())
-			$data['components'] = array_replace_recursive($data['components'], $privates_components);
+			$data['components'] = array_replace_recursive($data['components']??[], $privates_components);
 		
 		static::queue('create_remote_entity', ['map_id'=>$map_id, 'key'=>$entity->key, 'type'=>$entity->type, 'entity'=>$data]);
 	}		

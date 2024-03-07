@@ -154,10 +154,11 @@ abstract class IPosition
 				else
 				{	
 					// Бывает такое в PHP, в объекте (код выше) уже исправлено а напрямую тут исправим
+					$value = round($value, POSITION_PRECISION);
 					if($value == -0)
 						$value = 0;
 			
-					$this->_coords[$key] = round($value, POSITION_PRECISION);
+					$this->_coords[$key] = $value;
 				}
 			break;
 			

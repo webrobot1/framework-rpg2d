@@ -30,7 +30,7 @@ class Events extends AbstractCollection
 				else
 				{
 					if(empty($group['action']) && (!$action = $this->get($group_name)->action))
-						throw new Error('Нельзя обновить обнвоить событие данными если оно не имело активного action и в пакете отсутвует тот который нужно установить '.print_r($events, true));
+						throw new Error($object->key.': Нельзя обновить событие '.$group_name.' данными если оно не имело активного action и в пакете отсутвует данное поле '.print_r($group, true));
 					
 					$this->add
 					(
@@ -142,6 +142,9 @@ class Events extends AbstractCollection
 		{
 			// это вируатльное поле, нужно нам для понмиания есть ли в группе хоть одно публичное событие (используется в EventGroup)
 			$group['isPublic'] = false;
+			
+			if(!isset($group['entitys']))
+				throw new Error('У группы событий '.$group_name.' отуствует параметр entitys о принадлежности ее к сущностям');
 			
 			if(!empty($group['code']))
 			{

@@ -125,7 +125,8 @@ abstract class EntityAbstract
 		$this->forward 	= new Forward(object: $this);
 				
 		// пока все под 2Д
-		$tile = round($this->x).Position::DELIMETR.round($this->y).Position::DELIMETR.round($this->z);
+		//(int)  обязательно может вернуть -0
+		$tile = (int)round($this->x).Position::DELIMETR.(int)round($this->y).Position::DELIMETR.(int)round($this->z);
 		if($this->map_id==MAP_ID)
 		{
 			// посмотрим случайные позиции с указанной карте или текущей если не указана
@@ -172,6 +173,7 @@ abstract class EntityAbstract
 		}			
 		
 		// события и компоненты дополнят changes внутри себя при инициализации
+		// события строго первыми тк код компонентов может првоерять наличие тех или иных событий
 		$this->events = new Events($this, $events);
 		$this->components = new Components($this, $components);			
 	}	
@@ -321,11 +323,11 @@ abstract class EntityAbstract
 							if(MAP_ID == $map_id) 
 								throw new Error('Нельзя напрямую менять параметры ('.$key.') существу '.$this->key.' с текущей локации (используйте новый экземпляр Position)');
 							
-							// Бывает такое в PHP
+							$value = round($value, POSITION_PRECISION);
+							
+							// Бывает такое в PHP, но на number_format переделывать не хочу тк он в 3 раза медленнее
 							if($value == -0)
 								$value = 0;
-							
-							$value = round($value, POSITION_PRECISION);
 							
 							// это должно быть именно тут , не в Position (тк метод update может вызываться принудительно минуя свойство ->position)
 							$old_position = $this->position->round();
@@ -346,6 +348,10 @@ abstract class EntityAbstract
 								throw new Error('Нельзя напрямую менять параметры ('.$key.') существу '.$this->key.' с текущей локации (используйте новый экземпляр Forward)');
 							
 							$value = round($value, POSITION_PRECISION);
+							
+							// Бывает такое в PHP
+							if($value == -0)
+								$value = 0;
 						break;
 						
 						// если напрямую сменилась карта
@@ -449,9 +455,10 @@ abstract class EntityAbstract
 											unset($local_changes[$change_type2]);										
 									}
 								}
-								
+
+								// могут прийти отдельно data или отдельно action - тогда его надо обновить  а не перезаписать конкретное событие
 								foreach($value2 as $key3=>$value3)
-								{	
+								{
 									$local_changes[$change_type][$key][$key2][$key3] = $value3;
 								}
 							}
@@ -522,8 +529,9 @@ abstract class EntityAbstract
 			PHP::log('проверка координат ('.$this_x.', '.$this_y.') на предмет ухода с локации');	
 		
 		// это точки существа учитывающая точку текущей карты на плоскости открытого мира учитывая что отсчет идет от левого верхнего угла вниз
-		$x = round($this_x + $sides[MAP_ID]['x']);	
-		$y = round($this_y - $sides[MAP_ID]['y']);	
+		// (int)  обязательен тк может вернуть -0
+		$x = (int)round($this_x + $sides[MAP_ID]['x']);	
+		$y = (int)round($this_y - $sides[MAP_ID]['y']);	
 		
 		// если зашли за левый край карты
 		if(round($this_x)<0)
