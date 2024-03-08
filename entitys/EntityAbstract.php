@@ -148,7 +148,6 @@ abstract class EntityAbstract
 			}
 		}
 	
-
 		$this->position	 = new Position(object: $this);	
 
 		//	проверим локальные позиции свободны ли	

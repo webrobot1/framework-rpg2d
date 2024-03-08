@@ -89,26 +89,15 @@ class Components extends AbstractCollection
 		{
 			// для существ с другой локации тригер не создаем (он уже вызвался у родной локации) и не рассылаем изменения (тк сами мы их поменять не можем а обновление по существу уже были всем разосланы еще в websocket)
 			if($map_id == MAP_ID)
-			{		
+			{	
 				// если объект есть на сцене
-				// мы не можем вызвать иначе тк для тригера нужен объект в тч components заполненный который создасться после создания объекта
+				// мы не можем вызвать иначе тк для тригера нужен объект в тч component заполненный который создасться после создания объекта
 				if(World::isset($object_key))
 				{
-					$new_value = $this->trigger($key, $value);
-					
-					// tclb мы привели к null значение а оно было не null тогда не сохранем
-					if($new_value!==null || $new_value === $value)
-						$value = $this->values[$key] = $new_value;	
+					$this->trigger($key, $value);					
 				}
 				else
-					$this->values[$key] = $value;	
-
-				$data = ['components'=>[$key=>$value]];		
-			
-				if($component['isSend'])
-					$this->object->setChanges($data);
-				else
-					$this->object->setChanges($data, EntityChangeTypeEnum::Privates);
+					$this->values[$key] = $value;
 			}
 			else
 				$this->values[$key] = $value;	
@@ -138,10 +127,12 @@ class Components extends AbstractCollection
 	}
 	
 	// просто запустить триггер при смене значения или как только сущность появляется на сцене (World->add)
-	public function trigger(string $key, $value):mixed
+	public function trigger(string $key, $value):void
 	{
 		if($this->object->map_id != MAP_ID)
 			throw new Error('Нельзя создавать триггер на изменении компонента существа с другой локации ('.$this->object->map_id.') , где он должен выполнятся');
+		
+		$data = null;
 		
 		// при добавлении в объекты и если изменилось значение - вызовем тригер 
 		if($closure = &static::list()[$key]['closure'])
@@ -152,18 +143,37 @@ class Components extends AbstractCollection
 			if(APP_DEBUG)
 				$this->object->log('запустим триггер песочницы компонента '.$key);
 			
-			try{			
+			try
+			{			
 				$recover = Block::current();
 				Block::$components = true;																	// запретим менять компоненты , но разрешим вешать события на тригеры значений компонентов
-				$value = $closure($this->object, $value);													// передадим старое значение. если захотим вернем его (да можно предавать по ссылки но тока в песочнице php, а есть еще и lua и js)
+				$new_value = $closure($this->object, $value);												// передадим старое значение. если захотим вернем его (да можно предавать по ссылки но тока в песочнице php, а есть еще и lua и js)
+			
+				// если мы привели к null значение а оно было не null тогда не сохранем и не рассылаем (предполагаем что уже разослали в событие или просто нечего менять)
+				if($new_value!==null || $new_value === $value)
+				{
+					$this->values[$key] = $new_value;
+					$data = ['components'=>[$key=>$new_value]];		
+				}
 			}
 			finally
 			{
-				Block::recover($recover);																					// после вернем как было (тк может мы из какого то друого места пришли где были запреты уже, например из зигрузки на карту сущности)	
+				Block::recover($recover);																	// после вернем как было (тк может мы из какого то друого места пришли где были запреты уже, например из зигрузки на карту сущности)	
 			}
 		}	
+		else
+		{
+			$data = ['components'=>[$key=>$value]];	
+			$this->values[$key] = $value;	
+		}
 		
-		return $value;
+		if($data)
+		{
+			if(static::$_list[ComponentListEntityTypeEnum::All->value][$key]['isSend'])
+				$this->object->setChanges($data);
+			else
+				$this->object->setChanges($data, EntityChangeTypeEnum::Privates);
+		}		
 	}
 	
 	final public function privates():array
