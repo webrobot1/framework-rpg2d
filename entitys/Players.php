@@ -4,9 +4,7 @@ class Players extends EntityAbstract
 {	
 	public float $last_active;							// microtime с последней активностью	
 	private array $_last_save_data = array();			// последние сохраненные даныне что бы сравнивать и не сохранять то что не изменилось
-	
-	private static Closure $_compare;					// функция сравнения массивов при сохранении
-	
+
     public function __construct(public readonly string $login, public string $ip, public ?float $ping = 0, ...$arg)
     {	
 		parent::__construct(...$arg);
@@ -23,17 +21,6 @@ class Players extends EntityAbstract
 		}
 
 		$this->last_active = microtime(true);
-		
-		if(empty(static::$_compare))
-			static::$_compare = function (array $keys, $new_value, $old_value)
-			{
-				// компонент типа массив  и или событие  - сохранятеся целиком (тк в компоненте могло что то быть удалено, а события для сохранения через mass insert нам нужны все поля, даже те что не менялись тк у игрового сервера нет копий что бы дополнять)
-				// возможно с swoole асинхронныи корутинами я смогу вставлять через multi query insert on duplicate update асинхронно без mass insert только изменившиеся поля
-				if(!empty($keys[1]) && ($keys[0] == 'components' || $keys[0] == 'events'))
-				{	
-					return true;
-				}
-			};
     } 
    	
 	// какие колонки выводить в методе toArray и которые можно изменить из вне класса
@@ -112,60 +99,14 @@ class Players extends EntityAbstract
 		}	
 
 		$not_changes = array();
-		if(($data != $this->_last_save_data) && ($this->_last_save_data = static::array_replace_recursive($this->_last_save_data, $data, $not_changes)) && $data)
+		if(($data != $this->_last_save_data) && ($this->_last_save_data = Data::compare_recursive($this->_last_save_data, $data, $not_changes)) && $data)
 		{	
 			// пинг игрока нам дает клиент	
 			$data['ping'] = $this->ping;
-			PHP::save($this->type, $this->id, $data);	
+			PHP::save(EntityTypeEnum::from($this->type), $this->id, $data);	
 		}
 
 		if(APP_DEBUG && $not_changes)
 			$this->log('После уникализации данных на сохранение '.(!$data?'нечего сохранять':'удален пакет'.print_r($not_changes, true)));		
 	}
-
-	// дабы не сохранять в бд не изменившиеся значения
-	// $not_changes  массив данных которые не изменились и были удалены из $new_data
-	// $callback функция указвает нужно ли массивы с вложенностью аргумента $compare_key если он изменились перезаписать новым значением целиком (возврат true) или менять только отдельные эллементы изменившиеся
-	private static function array_replace_recursive(array $old_data, array &$new_data, array &$not_changes = array(), array $compare_key = array()):array
-	{
-		$aReturn = array();
-		foreach ($new_data as $mKey => &$new_value) 
-		{
-			$new_compare_key = $compare_key;
-			$new_compare_key[] = $mKey;
-
-			// если есть старый ключ или callback функция вернула false
-			if (array_key_exists($mKey, $old_data) && $old_data[$mKey] != $new_value && !empty($old_data[$mKey])) 			
-			{
-				if (is_array($new_value) && $new_value && !call_user_func(static::$_compare, $new_compare_key, $new_value, $old_data[$mKey])) 																	
-				{
-					$not_changes[$mKey] = array();
-					$old_data[$mKey] = static::array_replace_recursive($old_data[$mKey], $new_value, $not_changes[$mKey], $new_compare_key);
-					
-					if(empty($not_changes[$mKey]))
-						unset($not_changes[$mKey]);
-					elseif(empty($new_value))
-						unset($new_data[$mKey]);
-				} 
-				else 
-				{
-					$old_data[$mKey] = $new_value;
-				}
-			} 
-			// иначе новое значение запишется без првоерки
-			else
-			{ 
-				// если даныне теже самые удалим из массива . это может быть полезно что в массиве новых данных остались именно новые
-				if(array_key_exists($mKey, $old_data) && $old_data[$mKey] == $new_value)
-				{
-					$not_changes[$mKey] = $new_value;
-					unset($new_data[$mKey]);
-				}
-				else
-					$old_data[$mKey] = $new_value;	
-			}
-		}
-		
-		return $old_data;
-	} 
 }

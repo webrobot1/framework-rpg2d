@@ -61,7 +61,6 @@ class EventGroup
 		}
 	}	
 	
-	// remote - значит запрос на данное действие пришел с другой локации (в таком случае мы вносим изменения но рассылаем только игрокам что бы не послылать команды обратно)	
 	public function remove()
 	{		
 		if(Block::$events) 
@@ -73,19 +72,22 @@ class EventGroup
 				$this->log('удаления (remove)');
 		
 			#Perfomance - экономит доли миллисекунды за счет отуствия постоянного обращение к свойствам объекта (везде пихать нет смысла, а только там где более 1 раза идет обращение)
-			$is_another_map = ($this->object->map_id!=MAP_ID?$this->object->map_id:null);
 			$remote_update = $this->object->remote_update;
-		
+			$is_another_map = ($this->object->map_id!=MAP_ID?$this->object->map_id:null);
+			
 
 			$data = ['events'=>[$this->name=>['action'=>'']]];
 			if(!$is_another_map || !$remote_update)
-			{			
-				if(Events::list()[$this->name]['sending'] > EventSendingEnum::NONE)
-					$this->object->setChanges($data);
+			{	
+				$player_type = EntityTypeEnum::Players->value;
+				$private_change_type = EntityChangeTypeEnum::Privates;
+				
+				if(!$is_another_map && Events::list()[$this->name]['sending'] > EventSendingEnum::None->value)
+					$this->object->setChanges($data, EntityChangeTypeEnum::All);
 				else
 				{
-					if(!$is_another_map  && $this->object->type == EntityTypeEnum::Players->value && !empty(Events::list()[$this->name]['methods'][$this->event->action]['isPublic']))
-						$this->object->setChanges($data, EntityChangeTypeEnum::Privates);
+					if(!$is_another_map && ($this->object->type != $player_type || !empty(Events::list()[$this->name]['methods'][$this->event->action]['isPublic'])))
+						$this->object->setChanges($data, $private_change_type);
 					else
 						$this->object->setChanges($data, EntityChangeTypeEnum::Events4Remote);	
 				}
@@ -114,8 +116,9 @@ class EventGroup
 		
 		#Perfomance - это экономия долей миллисекунды но тем не менее экономия за счет отсутвия обращения к обхектам
 		$is_event_exists = !empty($this->event);
-		$is_another_map = ($this->object->map_id!=MAP_ID?$this->object->map_id:null);
 		$remote_update = $this->object->remote_update;
+		$is_another_map = ($this->object->map_id!=MAP_ID?$this->object->map_id:null);
+		$player_type = EntityTypeEnum::Players->value;
 		
 		
 		### Внимание! ниже уже Exception при которых сервер не падает а отключатеся только клиент ###
@@ -174,12 +177,13 @@ class EventGroup
 				unset($data['time']);
 			}
 			
-			if(Events::list()[$this->name]['sending']>EventSendingEnum::NONE)
+			$private_change_type = EntityChangeTypeEnum::Privates;
+			if(Events::list()[$this->name]['sending']>EventSendingEnum::None->value)
 			{	
 				// если не указано отправлять data события отправим ее только локациям смежным
-				if(Events::list()[$this->name]['sending'] < EventSendingEnum::DATA)
+				if(Events::list()[$this->name]['sending'] < EventSendingEnum::Data->value)
 				{	
-					$this->object->setChanges(['events'=>[$this->name=>['data'=>$data['data']]]], EntityChangeTypeEnum::Events4Remote);
+					$this->object->setChanges(['events'=>[$this->name=>['data'=>$data['data']]]], ($is_another_map || $this->object->type == $player_type?EntityChangeTypeEnum::Events4Remote:$private_change_type));
 					unset($data['data']);						
 				}
 				
@@ -187,25 +191,21 @@ class EventGroup
 				// и только если создало событие сервер тк когда сами создаем мы помечаем это (съэкономим на этом чуть данных пакета пересылаемого)
 				if(isset($data['from_client']))
 				{
-					if(empty($data['from_client']) && $this->object->type == EntityTypeEnum::Players->value)
-						$this->object->setChanges(['events'=>[$this->name=>['from_client'=>$from_client]]], EntityChangeTypeEnum::Privates);				
+					if(empty($data['from_client']) && $this->object->type == $player_type)
+						$this->object->setChanges(['events'=>[$this->name=>['from_client'=>$from_client]]], $private_change_type);				
 				
 					// другим игрокам незачем знать у кого какие события созданы сервером или игроком самим.
 					unset($data['from_client']);
 				}
 					
-				$this->object->setChanges(['events'=>[$this->name=>$data]]);	
+				$this->object->setChanges(['events'=>[$this->name=>$data]], (!$is_another_map?EntityChangeTypeEnum::All:EntityChangeTypeEnum::Events4Remote));	
 			}
 			else
 			{
-				// если это публичное событие и от игрока пришло то шлем ему данные полностью
-				if(!$is_another_map && $this->object->type == EntityTypeEnum::Players->value && !empty(Events::list()[$this->name]['methods'][$action]['isPublic']))
-				{
-					$this->object->setChanges(['events'=>[$this->name=>$data]], EntityChangeTypeEnum::Privates);
-				}					
+				if(!$is_another_map && ($this->object->type != $player_type || !empty(Events::list()[$this->name]['methods'][$this->event->action]['isPublic'])))
+					$this->object->setChanges(['events'=>[$this->name=>$data]], $private_change_type);
 				else
-					// в противном случае разошлем только соседним локациям
-					$this->object->setChanges(['events'=>[$this->name=>$data]], EntityChangeTypeEnum::Events4Remote);		
+					$this->object->setChanges(['events'=>[$this->name=>$data]], EntityChangeTypeEnum::Events4Remote);	
 			}
 		}
 		
@@ -240,34 +240,32 @@ class EventGroup
 
 		#Perfomance - это экономия долей миллисекунды но тем не менее экономия за счет отсутвия обращения к объекту
 		$remote_update = $this->object->remote_update;
+		$is_another_map = ($this->object->map_id!=MAP_ID?$this->object->map_id:null);
+		$player_type = EntityTypeEnum::Players->value;
 		
 		if(isset($this->_time) && !$remote_update)
 			$remain = $this->remainTime();
 		
 		$seconds = round($seconds, 3);
 		$this->_time = microtime(true) + $seconds;
-
+		
+		if(APP_DEBUG)
+			$this->log('сдвиг '.($this->event?'текущего':'следующего').' времени события (+'.$seconds.' секунд)');
+		
 		// что бы не спамить памекатми и логами на события чьи паузы и так малы между событиями и игрок не поставил галочку Не отправлять оставшееся время в админке
-		if(!isset($remain) || $remain>=static::MIN_EVENT_TIME_SENDING)	
-		{
-			if(APP_DEBUG)
-				$this->log('сдвиг '.($this->event?'текущего':'следующего').' времени события (+'.$seconds.' секунд)');		
-				
-			if(Events::list()[$this->name]['send_remain'] && ($this->object->map_id == MAP_ID || !$remote_update))
-			{
-				if(Events::list()[$this->name]['sending']>EventSendingEnum::NONE)    
-				{	
-					$this->object->setChanges(['events'=>[$this->name=>['time'=>$this->_time]]]);
-				}
-				else
-				{
-					// если есть хотя бы одно публичное событие в группе (не путать с публичным конкретным событием - тут именно группу првоеряем)
-					if(!empty(Events::list()[$this->name]['isPublic']))
-						$this->object->setChanges(['events'=>[$this->name=>['time'=>$this->_time]]], EntityChangeTypeEnum::Privates);
-					else
-						$this->object->setChanges(['events'=>[$this->name=>['time'=>$this->_time]]], EntityChangeTypeEnum::Events4Remote);	
-				}					
+		if((!isset($remain) || $remain>=static::MIN_EVENT_TIME_SENDING && Events::list()[$this->name]['send_remain']) && (!$is_another_map || !$remote_update))	
+		{	
+			if(!$is_another_map && Events::list()[$this->name]['sending']>EventSendingEnum::None->value)    
+			{	
+				$this->object->setChanges(['events'=>[$this->name=>['time'=>$this->_time]]], EntityChangeTypeEnum::All);
 			}
+			else
+			{
+				if(!$is_another_map && ($this->object->type != $player_type || !empty(Events::list()[$this->name]['isPublic'])))
+					$this->object->setChanges(['events'=>[$this->name=>['time'=>$this->_time]]], EntityChangeTypeEnum::Privates);
+				else
+					$this->object->setChanges(['events'=>[$this->name=>['time'=>$this->_time]]], EntityChangeTypeEnum::Events4Remote);	
+			}					
 		}
 		
 		return $this->_time;
@@ -280,7 +278,7 @@ class EventGroup
 		
 	// вернет кешированный таймаут с последнего обновления
 	// это полезно если мы уже запросили таймаут события для существ (выполнив код в песочнице) и что бы в рамках одного кадра более не запрашивать (снова не выполнять код в песочнице) - ведь и другие события могут запросить других событий таймаут  
-	private function timeout():float
+	public function timeout():float
 	{			
 		if(Block::$timeout) 
 			throw new Error('сейчас запрещено вызывать запросы таймаута во избежания зацикливания функции его расчета вызванной ранее');
@@ -338,17 +336,17 @@ class EventGroup
 				&& 
 			(!isset($this->_timeout_cache[$this->name]) || abs($this->_timeout_cache[$this->name] - $value) >= static::MAX_CHANGE_TIMEOUT) 
 				&& 
-			(Events::list()[$this->name]['sending']>EventSendingEnum::NONE || !empty(Events::list()[$this->name]['isPublic']))
+			(Events::list()[$this->name]['sending']>EventSendingEnum::None->value || !empty(Events::list()[$this->name]['isPublic']))
 		)
 		{  
-			$this->object->setChanges(['events'=>[$this->name=>['timeout'=>$value]]], EntityChangeTypeEnum::Players);
+			$this->object->send([EntityChangeTypeEnum::All->value=>[$this->object->map_id=>[EntityTypeEnum::Players->value=>[$this->object->key=>['events'=>[$this->name=>['timeout'=>$value]]]]]]]);
 		}
 				
 		// кеш хранится до пока событие не произойдет и непересчитает его
 		$this->_timeout_cache[$this->name] = $value;
 	}
 	
-	private function remainTime():float
+	public function remainTime():float
 	{	
 		$remain = round($this->_time - microtime(true), 3);
 		return $remain<0?0:$remain;
@@ -370,12 +368,6 @@ class EventGroup
 			case 'time':
 				return $this->_time;
 			break;		
-			case 'timeout':
-				return $this->timeout();
-			break;		
-			case 'remainTime':
-				return $this->remainTime();
-			break;
 			default:
 				throw new Error('Нельзя получить поле события '.$key);
 			break;

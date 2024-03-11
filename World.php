@@ -122,12 +122,24 @@ abstract class World
 		// если существо для другой локации просто отправим на нее пакет что мы хотим его создать не рассылая ничего
 		else
 		{
-			Channel::create_remote_entity($entity);
+			static::create_remote_entity($entity);
 			$entity->__destruct();
 		}
 
 		return $entity->key;
 	}		
+
+	// создание сущности на лругой лкоации - через код API или при переходе
+	private static function create_remote_entity(EntityAbstract $entity, ?int $map_id = null)
+	{
+		$data = array();
+		$data = $entity->toArray();
+
+		if($privates_components = $entity->components->privates())
+			$data['components'] = array_replace_recursive($data['components']??[], $privates_components);
+	
+		Channel::create_remote_entity($entity->key, $data, $map_id);
+	}	
 
 	public static function isRemove(string $key):bool
 	{
@@ -168,7 +180,7 @@ abstract class World
 						$closure($entity, $new_map);
 					}
 					
-					$entity->setChanges(['action'=>SystemActionEnum::ACTION_REMOVE]);
+					$entity->setChanges(['action'=>SystemActionEnum::ACTION_REMOVE], EntityChangeTypeEnum::All);
 				}
 			}
         }
@@ -290,7 +302,7 @@ abstract class World
 					$new_position = $position->tile();
 				else
 					$new_position = $position->add(new Position($x, $y))->tile();
-				
+
 				if(!empty(static::$_positions[$new_position]))
 				{
 					foreach(static::$_positions[$new_position] as $key)
@@ -356,7 +368,7 @@ abstract class World
 							if(APP_DEBUG)
 								static::$_entitys[$key]->log("Отправка пакета о переходе с карты ".MAP_ID." на ".$new_map);
 							
-							Channel::create_remote_entity(World::get($key), $new_map);	
+							static::create_remote_entity(World::get($key), $new_map);	
 						}
 					}
 					

@@ -61,7 +61,7 @@ abstract class Frame
 
 					// обязательно проверка на isset а то создадим событие 
 					// если у существа не пришло время конкретно этого события - пропускаем существо
-					if(!$entity->events->isset($group_name) || (!$event = $entity->events->get($group_name)) || (!$action = $event->action) || $event->remainTime>0)
+					if(!$entity->events->isset($group_name) || (!$event = $entity->events->get($group_name)) || (!$action = $event->action) || $event->remainTime()>0)
 						continue;		
 
 					// обязательно сохранить тк $event  после finish обнулиться  

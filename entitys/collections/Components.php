@@ -1,9 +1,8 @@
 <?php
 class Components extends AbstractCollection
-{
-	// справочник компонентов и их кода
-	private static array $_list;
-	private array $_privates;						    // массив названий и значений по ссылки компонентов которые в админке указаны как защищенные от рассылки другим (нужно лишь для игроков)
+{	
+	private static array $_list;										// справочник компонентов и их кода
+	private array $_privates;							// массив названий и значений по ссылки компонентов которые в админке указаны как защищенные от рассылки другим (нужно лишь для игроков)
 	
 	function __construct(protected EntityAbstract $object, array $components = array())
 	{
@@ -170,7 +169,7 @@ class Components extends AbstractCollection
 		if($data)
 		{
 			if(static::$_list[ComponentListEntityTypeEnum::All->value][$key]['isSend'])
-				$this->object->setChanges($data);
+				$this->object->setChanges($data, EntityChangeTypeEnum::All);
 			else
 				$this->object->setChanges($data, EntityChangeTypeEnum::Privates);
 		}		
@@ -203,7 +202,7 @@ class Components extends AbstractCollection
 		
 		return static::$_list[$type->value];
     }
-	
+
 	public static function init(array $components)
 	{
 		if(APP_DEBUG)
@@ -213,7 +212,7 @@ class Components extends AbstractCollection
 		{
 			if(!isset($component['entitys']))
 				throw new Error('У компонента '.$name.' отуствует параметр entitys о принадлежности копонента к сущностям');
-				
+			
 			// создадим из текстовой версии кода которая нам пришла замыкание которое можно будет вызывать при сменен компонет а
 			if(!empty($component['code']))
 			{

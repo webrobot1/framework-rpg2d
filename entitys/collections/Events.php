@@ -21,7 +21,7 @@ class Events extends AbstractCollection
 				if(isset($group['action']) && empty($group['action']))
 				{
 					if(isset($group['data']) || isset($group['from_client']))
-						throw new Error('Пакет обнуления события содержит дополнительные данные как для создания нового '.print_r($events, true));
+						throw new Error($object->key.': Пакет обнуления события '.$group_name.' содержит дополнительные данные как для создания нового в пакете существа с '.($object->map_id!=MAP_ID?'другой':'текущей').' локации '.print_r($events, true));
 					
 					$this->get($group_name)->remove();
 					

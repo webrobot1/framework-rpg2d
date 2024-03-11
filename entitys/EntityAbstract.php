@@ -101,10 +101,6 @@ abstract class EntityAbstract
 			throw new Error('существо '.$this->key.' '.($this->map_id != MAP_ID?'с другой локации':'').' не может быть создано с пометкой action что оно удаляется');					
 				
 
-		// логирование выше не ставить !  Тк карта должна быть обявлена до первого лока
-		if(APP_DEBUG)
-			$this->log('создание объекта новой сущности');
-		
 		// посмотрим случайные позиции с указанной карте или текущей если не указана
 		if(!$tiles = Map2D::getCurrentMapTiles())
 			throw new Error('Нет ниодной свободной клетки без физики');
@@ -159,16 +155,21 @@ abstract class EntityAbstract
 		if($this->map_id!=MAP_ID && empty(Map2D::sides()[$this->map_id]))
 			throw new Error('Карта '.$this->map_id.' для создаваемого существа отсутвует не принадлежит центральной ('.MAP_ID.') или смежной из списка '.implode(',', array_keys(Map2D::sides())));	
 		
-		if(APP_DEBUG && $this->map_id!=MAP_ID)
-			$this->log('сущность создается с другой карты ('.$this->map_id.')');
-
+		if(APP_DEBUG)
+		{
+			if($this->map_id!=MAP_ID)
+				$this->log('создается объект сущности '.(!$remote_update?'c':'для').' другой карты ('.$this->map_id.')');
+			else 
+				$this->log('создание объекта сущности для текущей карты');
+		}
+		
 		// сначал поместим все публичные изменения на рассылку
 		if($this->map_id == MAP_ID)
 		{
 			if(APP_DEBUG)
 				$this->log('Подготовим общие (без свойств и компонентов) данные нового существа как изменения для рассылки всем игрокам и смежным локациями');
 			
-			$this->setChanges($this->toArray());
+			$this->setChanges($this->toArray(), EntityChangeTypeEnum::All);
 		}			
 		
 		// события и компоненты дополнят changes внутри себя при инициализации
@@ -266,7 +267,7 @@ abstract class EntityAbstract
 		if((isset(static::columns()[$key]) || isset($this->position_columns()[$key])) && $key!='events' && $key!='components')
 		{
 			// отправляем в клиент только если изменилось значение или action (он может несколько раз повторятся)
-			if($this->$key != $value || $key=='action')
+			if($key=='action' || (isset($this->position_columns()[$key]) && ($position_array = $value->toArray()) != $this->$key->toArray()) || (isset(static::columns()[$key]) && $this->$key != $value))
 			{
 				if(APP_DEBUG)
 					$this->log('изменение поля '.$key.' на '.$value.($remote_update?' в режиме синхронизации локации с '.$map_id:''));	
@@ -287,9 +288,12 @@ abstract class EntityAbstract
 						// именно тк что бы посчиталась правильная позиция ровная с учетом положения
 						$old_position = $this->$key->round();
 					}
-					
-					foreach($value->toArray() as $coord=>$coord_value)
+
+					foreach($position_array as $coord=>$coord_value)
 					{
+						// экономим пакет - не передаем не изменившиеся части координат
+						if($this->$coord == $coord_value) continue;
+						
 						// с forward такой колхоз тк нельзя отдельно менять 
 						if(is_a($value, Forward::class))
 						{
@@ -301,7 +305,7 @@ abstract class EntityAbstract
 							throw new Error('Значение свойства '.$key.' не является объектом позиции');
 						
 						$this->$coord = $coord_value;
-						$this->setChanges([$coord=>$coord_value]);
+						$this->setChanges([$coord=>$coord_value], EntityChangeTypeEnum::All);
 					}
 
 					// если существо под удалением ничего уже не меняем ему
@@ -366,7 +370,7 @@ abstract class EntityAbstract
 								if($value == MAP_ID)
 									throw new Error('нельзя перещаться с текущей карты на текущую');
 								
-								$this->setChanges([$key=>$value]);
+								$this->setChanges([$key=>$value], EntityChangeTypeEnum::All);
 								World::remove($this->key, $value);	
 							}
 
@@ -377,98 +381,77 @@ abstract class EntityAbstract
 					$this->$key = $value;
 					
 					if($map_id == MAP_ID)
-						$this->setChanges([$key=>$value]);
+						$this->setChanges([$key=>$value], EntityChangeTypeEnum::All);
 				}
 			}	
 		}
 		else
-			throw new Error('нельзя изменить поле '. $key);
+			throw new Error($this->key.': нельзя изменить поле '. $key);
 	}
 	
 	
 	// todo сделать что бы это сразу вносилось в глобальный кеш World для отправки (тк там и есть данные удаления сущнсоти котоыре не снять уже после самого ее удаления тк нет $this)
-	public function setChanges(array $changes, EntityChangeTypeEnum $type = EntityChangeTypeEnum::All)
+	public function setChanges(array $changes, EntityChangeTypeEnum $type)
 	{
 		if(empty($changes))
 			throw new Error('Изменения существа '.$this->key.' не могут быть пустым массивом');
 		
-		if($type!=EntityChangeTypeEnum::Players && ($denied = array_diff_key($changes, static::columns())))
-			throw new Error('нельзя отправлять пакет изменений не связанных с полями сущности '.print_r($denied, true));	
+		if($type==EntityChangeTypeEnum::Players && ($denied = array_intersect_key($changes, static::columns())))
+			throw new Error('нельзя отправлять пакет изменений у существа '.$this->key.' типа '.$type->value.' у которого содержаться поля сущености тк рассылка идет всем игрокам '.print_r($denied, true));	
 		
-		if($this->map_id != MAP_ID)
-		{
-			if($type == EntityChangeTypeEnum::All)
-				$type =	EntityChangeTypeEnum::Events4Remote;
-			elseif($type != EntityChangeTypeEnum::Events4Remote)
-				throw new Error('Нельзя пометить пакет измнений существ с другой локации иначе чем '.EntityChangeTypeEnum::Events4Remote->value);		
-		}
+		if($type!=EntityChangeTypeEnum::Players && ($denied = array_diff_key($changes, static::columns())))
+			throw new Error('нельзя отправлять пакет изменений у существа '.$this->key.' не связанных с полями сущности '.print_r($denied, true));	
+		
+		// для существ с других карт можем менять лишь события Events4Remote
+		if($this->map_id != MAP_ID && $type != EntityChangeTypeEnum::Events4Remote)
+			throw new Error('Нельзя пометить пакет измнений у существа '.$this->key.' с другой локации иначе чем '.EntityChangeTypeEnum::Events4Remote->value);		
 		
 		if($type == EntityChangeTypeEnum::Events4Remote)
 		{
 			if(empty($changes['events']) || count($changes)>1)
-				throw new Error('Пакет изменений '.$type->value.' не может содержать что то кроме пакетов событий');	
+				throw new Error('Пакет изменений '.$type->value.' у существа '.$this->key.' не может содержать что то кроме пакетов событий'.print_r($changes, true));	
 			
 			// для неигроков данные приватныех событий NPC пихаем в Private, тк во избежание ошибок мы проверяем в websocket сервере что бы если с текущей лкоации то там были только игроков события
 			if($this->map_id == MAP_ID && $this->type != EntityTypeEnum::Players->value)
-				$type = EntityChangeTypeEnum::Privates;			
+				throw new Error($this->key.' не является существом с другой локации и не является игроком для рассылки пакета изменений типа'.$type->value.' '.print_r($changes, true));		
 		}
 		
 		$change_type = $type->value;
 		if(APP_DEBUG)
-			$this->log('внесены изменения ('.$change_type.' рассылка) '.print_r($changes, true));	
+			$this->log('внесены изменения '.$change_type.' группу рассылки '.print_r($changes, true));	
 		
 		$local_changes = &$this->_changes;
 		
 		// не используем array_replace  тк данные компонентов и событий могут быть массивы и они должны перезаписаться а не слиться воедино со старыми (если старые есть тк в течении кадра событие или компонент могли меняться по несколько раз)
 		if(!empty($local_changes[$change_type]))
-		{
-			if($local_changes[$change_type]!=$changes)
+		{		
+			$not_changes = array();
+			$finish_events = array();
+			$local_changes[$change_type] = Data::compare_recursive($local_changes[$change_type], $changes, $not_changes, $finish_events);
+				
+/* 			
+			// если более 1й группы то в других могут остаться пакеты для завершенного события (они удалялились только в своей группе при вызове update_recursive)
+			if($finish_events && count($local_changes)>1)
 			{
-				foreach($changes as $key=>$value)
+				foreach($finish_events as $event)
 				{
-					if(is_array($value) && isset($local_changes[$change_type][$key]) && $local_changes[$change_type][$key]!=$value)
+					foreach($local_changes as $type=>&$changes)
 					{
-						foreach($value as $key2=>$value2)
-						{	
-							if(is_array($value2) && isset($local_changes[$change_type][$key][$key2]) && $local_changes[$change_type][$key][$key2]!=$value2)
-							{
-								// не обязатнльно, тк websocket перед отправклй пролверит тоже самое (но что бы не слать лишние пакеты данных можно и тут сделать заодно понять как работает websocket в части удаления данных)
-								if($key == 'events' && isset($value2['action']) && empty($value2['action']))
-								{
-									foreach(array_keys($local_changes) as $change_type2)
-									{
-										unset($local_changes[$change_type2]['events'][$key2]['from_client']);	
-										unset($local_changes[$change_type2]['events'][$key2]['data']);
-										
-										if(isset($value2['data']))
-											throw new Error('Нельзя пометить событие как завершенное и указать для него новые данные');
-										
-										if(isset($value2['from_client']))
-											throw new Error('Нельзя пометить событие как завершенное и указать для него флаг об хапущенности с клиентской части или серверной');
-
-										if(empty($local_changes[$change_type2]['events'][$key2]))
-											unset($local_changes[$change_type2]['events'][$key2]);	
-										if(empty($local_changes[$change_type2]['events']))
-											unset($local_changes[$change_type2]['events']);										
-										if(empty($local_changes[$change_type2]))
-											unset($local_changes[$change_type2]);										
-									}
-								}
-
-								// могут прийти отдельно data или отдельно action - тогда его надо обновить  а не перезаписать конкретное событие
-								foreach($value2 as $key3=>$value3)
-								{
-									$local_changes[$change_type][$key][$key2][$key3] = $value3;
-								}
-							}
-							else
-								$local_changes[$change_type][$key][$key2] = $value2;
+						// тут мы уже удалили в Data::compare_recursive
+						if($type == $change_type)  continue;
+						
+						if(isset($changes['events'][$event]))
+						{
+							unset($changes['events'][$event]);
+							if(APP_DEBUG)
+								$this->log('обнулено из данных группы рассылки '.$type.' событие '.$event.' в связи с обнулением его в группе в '.$change_type);
 						}
-					}
-					else
-						$local_changes[$change_type][$key] = $value;	
-				}
-			}
+					}	
+				}	
+			} */
+			
+			if(APP_DEBUG && $not_changes)
+				$this->log('после уникализации удалены следующие изменения '.print_r($not_changes, true));			
 		}
 		else
 		{

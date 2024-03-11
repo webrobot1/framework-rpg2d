@@ -122,7 +122,7 @@ final class RemoteCommand
 					$access = false;		
 						
 				$player->last_active = microtime(true);
-				$remain = $player->events->get($group)->remainTime;
+				$remain = $player->events->get($group)->remainTime();
 				
 				// пинг пришел от клиента
 				if(array_key_exists('ping', $data))
@@ -140,7 +140,7 @@ final class RemoteCommand
 				else
 				{		
 					// если команда пришла до того как команда завершилась будем считать интерполяцией (те если уже все давно готово то интерполяция плохая и будем считать что команда НЕ непрерывная)
-					if(abs($remain) < $player->events->get($group)->timeout)
+					if(abs($remain) < $player->events->get($group)->timeout())
 					{
 						if($remain<0)
 						{ 
@@ -150,7 +150,7 @@ final class RemoteCommand
 						else
 						{
 							if(APP_DEBUG)
-								Perfomance::set('Sandbox      | своевременность поступления комманд к готовности события '.$group.' %', round($remain/$player->events->get($group)->timeout*100));		
+								Perfomance::set('Sandbox      | своевременность поступления комманд к готовности события '.$group.' %', round($remain/$player->events->get($group)->timeout()*100));		
 						}
 					}
 					
@@ -165,7 +165,7 @@ final class RemoteCommand
 						throw new Error('не найдена публичная команда '.$command);
 				}	
 			}				
-			catch(Throwable $ex)
+			catch(Exception $ex)
 			{
 				// не рушим сервер просто отключим игрока
 				$player->warning('Ошибка команды игрока '.serialize($data).', сервер продолжает работу '.$ex);
