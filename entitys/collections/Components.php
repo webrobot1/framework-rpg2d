@@ -1,7 +1,9 @@
 <?php
 class Components extends AbstractCollection
 {	
-	private static array $_list;										// справочник компонентов и их кода
+	private static array $_list;						// справочник компонентов и их кода
+	private static array $_components_closures;			// тригеры изменения компонента
+	
 	private array $_privates;							// массив названий и значений по ссылки компонентов которые в админке указаны как защищенные от рассылки другим (нужно лишь для игроков)
 	
 	function __construct(protected EntityAbstract $object, array $components = array())
@@ -9,35 +11,57 @@ class Components extends AbstractCollection
 		parent::__construct();
 		
 		#Perfomance - экономит доли миллисекунды за счет отуствия постоянного обращение к свойствам объекта (везде пихать нет смысла, а только там где более 1 раза идет обращение)
-		$remote_update = $this->object->remote_update;
-		$object_type = $this->object->type;
+		$permament_update = $this->object->permament_update;
+		$object_type = $this->object->type->value;
 			
-		if(!$remote_update && World::isset($this->object->key))
+		if(!$permament_update && World::isset($this->object->key))
 			throw new Error('нельзя переписать уже существующие компоненты принудительно существу '.$this->object->key.' с текущей локации');			
 		
 		if(APP_DEBUG)
-			$this->object->log('запрос на '.($remote_update?'обновление пакетом с ссоедней локации':'создание').' компонентвов сущности');
+			$this->object->log('запрос на '.($permament_update?'обновление пакетом с ссоедней локации':'создание').' компонентвов сущности');
 		
 		if(!isset(static::$_list))
 			throw new Error('Комнотенты не были проинициализированы через Components::init(...) для передачи списка доступных свойств');			
 		
 		if(!empty(static::$_list[$object_type]))
 		{
-			if($remote_update && !$components)
+			if($permament_update && !$components)
 				throw new Error('нельзя переписать существам с другой лкоации компоненты пустым набором');
-				
-			// заполним отсутвующие компоненты значениями по умолчанию
-			// сначала ТОЛЬКО добавляем компоненты со значениями которые пришли из вне или по умолчанию (в любом случае повесятся все значения)
-			foreach(static::$_list[$object_type] as $name=>$component)
-			{	
-				if($remote_update && !array_key_exists($name, $components)) continue;
-				
-				$value = (isset($components[$name])?$components[$name]:$component['default']);
-				$this->add($name, $value);	
-			}		
+			
+			foreach($components as $name=>$value)
+			{
+				$this->add($name, $value);					
+			}
 		}
 		elseif($components)
 			throw new Error('для сущности '.$object_type.' не предусмотрено никаких компонентов указанны в инициализации Components::init(...), однако пришли значения ('.json_encode($components).')');
+	}
+	
+	public static function init(array $components, array $components_closures)
+	{
+		if(isset(static::$_list))
+			throw new Error('Инициализация кода компонентов уже была произведена');
+		
+		static::$_list = array();
+		static::$_components_closures = $components_closures;
+		
+		if(APP_DEBUG)
+			PHP::log('Инициализация компонентов');
+		
+		foreach($components as $name=>&$component)
+		{
+			if(!isset($component['entitys']))
+				throw new Error('У компонента '.$name.' отуствует параметр entitys о принадлежности копонента к сущностям');
+						
+			static::$_list[ComponentListEntityTypeEnum::All->value][$name] = $component;
+			foreach($component['entitys'] as $entity_name=>$value)
+			{
+				if(!EntityTypeEnum::tryFrom($entity_name))
+					throw new Error('Неизвестная сущность '.$entity_name);
+				
+				static::$_list[$entity_name][$name] = &static::$_list[ComponentListEntityTypeEnum::All->value][$name];
+			}
+		}
 	}
 	
 	// компонентов может быть очень много и не у всех есть дефольные значения - такие компоненты НЕ присваюиваются существам, но они могут быть присвоены во время игры если эти компоненты доступны типу сущности
@@ -46,15 +70,14 @@ class Components extends AbstractCollection
 		if (!array_key_exists($key, $this->values)) 
 		{
 			#Perfomance - экономит доли миллисекунды за счет отуствия постоянного обращение к свойствам объекта
-			$object_type = $this->object->type;
+			$object_type = $this->object->type->value;
 			
 			if(empty(static::$_list[$object_type][$key]))
-				throw new Error('Компонент '.$key.' не разрешен для сущности '.$this->object->key.' с типом '.$object_type);
+				throw new Error('Компонент '.$key.' не разрешен для сущности '.$this->object->key.' с типом '.$object_type.print_r(static::$_list, true));
 			
-			// там всегда вернеться null тк вне кода этого приложения все что кроме null будет присвоено существу на этапе загрузки игрового пространства
 			return static::$_list[$object_type][$key]['default'];
 		}
-		else
+		else	
 			return $this->values[$key];
     }
 	
@@ -72,12 +95,12 @@ class Components extends AbstractCollection
 		
 		if (!$this->exists($key)) 
 		{
-			if(!isset($component['entitys'][$this->object->type]))
-				throw new Error('компонент '.$key.' не разрешен для сущности '.$object_key.' с типом '.$this->object->type);	
+			if(!isset($component['entitys'][$this->object->type->value]))
+				throw new Error('компонент '.$key.' не разрешен для сущности '.$object_key.' с типом '.$this->object->type->value);	
 		}
 		// может так быть: мы на соседнюю локацию шлем увеличение текущих hp (лечение), а существо уже убьют пока идет пакет и будет увеличение HP мертвому существу (как приме). 
 		// Поэтому не давать менять существам на соседних локациях напрямую компоненты. кроме как при создании нового существа
-		elseif($map_id!=MAP_ID && !$this->object->remote_update) 
+		elseif($map_id!=MAP_ID && !$this->object->permament_update) 
 			throw new Error('Нельзя менять компоненты созданного существ на другой локации (только при создании или на текущей. в остальном используйте события в которых могут менять в прцоессе выполнения на локации существа)');
 		
 		static::valid_type(ComponentTypeEnum::from($component['type']), $value);
@@ -106,21 +129,21 @@ class Components extends AbstractCollection
 		}
 	}
 
-	private static function valid_type(ComponentTypeEnum $type, string|float|array $default_value):void
+	private static function valid_type(ComponentTypeEnum $type, string|float|array $value):void
 	{
 		if($type == ComponentTypeEnum::Json)
 		{
-			if(!is_array($default_value))
+			if(!is_array($value))
 				throw new Error('Только массив допустим для присвоения свойства с типом json');	
 		}
 		elseif($type == ComponentTypeEnum::Number)
 		{
-			if(!is_numeric($default_value))
+			if(!is_numeric($value))
 				throw new Error('значение по умолчанию компонента должно быть числом тк указан соответсвующий тип');
 		}			
 		elseif($type == ComponentTypeEnum::String)
 		{
-			if(!is_string($default_value))
+			if(!is_string($value))
 				throw new Error('только строка разрешена для значения копонента');	
 		}					
 	}
@@ -134,7 +157,7 @@ class Components extends AbstractCollection
 		$data = null;
 		
 		// при добавлении в объекты и если изменилось значение - вызовем тригер 
-		if($closure = &static::list()[$key]['closure'])
+		if($closure = &static::$_components_closures[$key]??null)
 		{	
 			if(APP_DEBUG && ((!$trace = debug_backtrace(!DEBUG_BACKTRACE_PROVIDE_OBJECT | DEBUG_BACKTRACE_IGNORE_ARGS, 2)) || $trace[1]['function']!='add' || ($trace[1]['class']!=World::class && ($trace[1]['class']!=static::class || !World::isset($this->object->key)))))
 				throw new Error('Запуск кода смены компонента можно лишь при добавлении существа в World или при изменении данных уже добавленного '.print_r($trace, true));
@@ -180,7 +203,7 @@ class Components extends AbstractCollection
 		if(!isset($this->_privates))
 		{
 			$this->_privates = array();
-		    foreach(static::$_list[$this->object->type] as $key=>$value)
+		    foreach(static::$_list[$this->object->type->value] as $key=>$value)
 			{
 				// отдается в виде ссылки тк число компонентов не меняется и массив всегда будет содержать актуальные значения
 				if(!$value['isSend']) $this->_privates[$key] = &$this->values[$key];
@@ -202,50 +225,6 @@ class Components extends AbstractCollection
 		
 		return static::$_list[$type->value];
     }
-
-	public static function init(array $components)
-	{
-		if(APP_DEBUG)
-			PHP::log('Инициализация компонентов');
-		
-		foreach($components as $name=>&$component)
-		{
-			if(!isset($component['entitys']))
-				throw new Error('У компонента '.$name.' отуствует параметр entitys о принадлежности копонента к сущностям');
-			
-			// создадим из текстовой версии кода которая нам пришла замыкание которое можно будет вызывать при сменен компонет а
-			if(!empty($component['code']))
-			{
-				if(APP_DEBUG)
-					PHP::log('Создаем триггер компонента '.$name);
-				
-				try
-				{
-					// не меняйте текстовку ошибки - она парсится в мастер процессе песочницы которая запустила этот процесс
-					$component['closure'] = eval('return static function(EntityAbstract $object, $value):mixed{
-						'.$component['code'].' 
-						return $value;
-					};');
-				}
-				catch(Throwable $ex)
-				{
-					throw new Error('code('.$name.'): Ошибка компиляции кода изменения компонента: '.$ex);
-				}					
-			}
-			else
-				$component['closure'] = null;
-			
-			static::$_list[ComponentListEntityTypeEnum::All->value][$name] = $component;
-
-			foreach($component['entitys'] as $entity_name=>$value)
-			{
-				if(!EntityTypeEnum::tryFrom($entity_name))
-					throw new Error('Неизвестная сущность '.$entity_name);
-				
-				static::$_list[$entity_name][$name] = &static::$_list[ComponentListEntityTypeEnum::All->value][$name];
-			}
-		}
-	}
 	
 	// если этого не делать будет утечка памяти при удалении существа с карты тк ссылка останется тут
 	function __destruct()

@@ -4,14 +4,14 @@
 class Events extends AbstractCollection
 {		
 	private static array $_list;
-
+	
 	// remote_command = true означает что событие для существ с другой локации мы будем отправлять во вне и не нужно рассылать игрокам
 	function __construct(protected EntityAbstract $object, array $events = array())
 	{	
 		parent::__construct();
 
 		if(APP_DEBUG)
-			$object->log('запрос на '.($this->object->remote_update?'обновление пакетом с соседней локации':'создание').' событий сущности');
+			$object->log('запрос на '.($this->object->permament_update?'обновление пакетом с соседней локации':'создание').' событий сущности');
 		
 		// если от другой локации пришли данные то ненадо ее же оповещадь собирая для этого пакет 
 		foreach($events as $group_name=>$group)
@@ -52,7 +52,7 @@ class Events extends AbstractCollection
 			// это может быть не событие а просто обновление time
 			if(!empty($group['time']))
 			{
-				$seconds = round($group['time'] - microtime(true));
+				$seconds = round($group['time'] - microtime(true), 3);
 
 				if($seconds<0)
 					$seconds = 0;
@@ -61,15 +61,23 @@ class Events extends AbstractCollection
 				unset($group['time']);
 			}
 			
-			// я не стал делать отдельный тип рассылки который приватный для игроков но не рассылается локациям....так что это единсченный случай когда игроку присылаются приватный пакет и приходит смежной локации
-			if(!empty($group['timeout']))
-				unset($group['timeout']);
-			
+
 			if($group)
 				 throw new Error('После обработки события '.$group_name.' остались данные которые невозможно обработать '.print_r($group, true));            
 		}	
 	}
-
+	
+	public static function init(array $list)
+	{
+		if(isset(static::$_list))
+			throw new Error('Инициализация событий уже была произведена');
+		
+		if(APP_DEBUG)
+			PHP::log('Инициализация событий и групп');
+		
+		static::$_list = $list;
+	}
+	
 	// добавления нового события в список на следующий кадр
     // Внимание ! Этот метод может быть вызван от команы игрока в другом потоке! И до его завершения может начаться обработка событий! Добавляйте _values в самом конце! И проектируйте так что бы ничего не сломалось!
     public function add(string $group_name, string $action = 'index', array $data = array(), bool $from_client = false):void
@@ -132,65 +140,6 @@ class Events extends AbstractCollection
 		
 		return static::$_list;
     }
-	
-	public static function init(array $list)
-	{
-		if(APP_DEBUG)
-			PHP::log('Инициализация событий и групп');
-		
-		foreach($list as $group_name=>&$group)
-		{
-			// это вируатльное поле, нужно нам для понмиания есть ли в группе хоть одно публичное событие (используется в EventGroup)
-			$group['isPublic'] = false;
-			
-			if(!isset($group['entitys']))
-				throw new Error('У группы событий '.$group_name.' отуствует параметр entitys о принадлежности ее к сущностям');
-			
-			if(!empty($group['code']))
-			{
-				if(APP_DEBUG)
-					PHP::log('Инициализация функции таймаута группы событий '.$group_name);
-				try
-				{
-					// не меняйте текстовку ошибки - она парсится в мастер процессе песочницы которая запустила этот процесс
-					// todo пользователей не отключать по ошибке
-					$group['closure'] = eval('return static function(EntityAbstract $object, string $action):float{ 
-							'.$group['code'].' 
-					};');	
-				}
-				catch(Throwable $ex)
-				{
-					throw new Error('code('.$group_name.'): Ошибка компиляции таймаут кода группы события '.$ex);
-				}				
-			}
-			
-			foreach($group['methods'] as $event_name=>&$event)
-			{
-				if(APP_DEBUG)
-					PHP::log('Инициализация функции группы '.$group_name.' события '.$event_name);
-				
-				// если хоть одно событие публичное  - группа события помечается как публичная
-				if($event['isPublic'])
-					$group['isPublic'] = true;
-				
-				// создадим из текстовой версии кода которая нам пришла замыкание которое можно будет вызывать при сменен компонет а
-				try
-				{
-					// не меняйте текстовку ошибки - она парсится в мастер процессе песочницы которая запустила этот процесс
-					// todo отказаться от extraxt - долгая операция
-					$event['closure'] = eval('return function(EntityAbstract $object, array $data, bool $from_client):void{				
-							'.$event['code'].' 
-					};');	
-				}
-				catch(Throwable $ex)
-				{
-					throw new Error('code('.$group_name.'/'.$event_name.'): Ошибка компиляции кода события '.$ex);
-				}
-			}
-		}
-		
-		static::$_list = $list;
-	}
 	
 	function __destruct()
 	{	

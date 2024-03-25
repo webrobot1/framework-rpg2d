@@ -10,6 +10,87 @@ final class Map2D
 	
 	private function __construct(){}
 	
+	public static function init(array $sides, array $maps)
+	{
+		if(!DEFINED('MAP_ID'))
+			throw new Error('не указана текущая карта и сервер карты не запущен');		
+		
+		if(isset(static::$_sides))
+			throw new Error('Матрица карты уже была создана');
+				
+		if(APP_DEBUG)
+			PHP::log('Инициализация для создания матрицу 2D карты при инициализации');
+		
+		// конкретно для этого фреймворка ничего кроме высоты и ширины карты в пикселях не нужно (хотя там есть в массиве и войства произвольные слоев и тайлов но это все сугубо индивидуально для реализации в конкретной игре)
+		foreach($maps as $map_id=>&$map)
+		{
+			static::$_info[$map_id] = ['width'=>$map['width'], 'height'=>$map['height']];
+		}
+		
+		// сначало текущую карту созддим матрицу областей
+		static::$_terrain = static::$_current = static::getTerrain($maps[MAP_ID]);
+		
+		if(empty(static::$_current))
+			throw new Error('на текущей карты нет свободных клеток для движения');
+		
+		if(APP_DEBUG)
+			PHP::log('Собираем координаты текущей и соседних (со смещением в относительно текущей сетку координат) локаций');
+		
+		$delimetr = Position::DELIMETR;
+		if(static::$_sides = $sides)
+		{
+			// если карта не указана возвращаем центральную со смежными областями
+			foreach($sides as $map_id=>$side)
+			{
+				if($map_id == MAP_ID) continue;
+				
+				if(APP_DEBUG)
+					PHP::log('дополним матрицу игровой карты смежной локацией '.$map_id);
+		
+				foreach(array_keys(static::getTerrain($maps[$map_id])) as &$position)
+				{
+					$explode = explode($delimetr, $position);
+					
+					static::encode2dCoord($explode[0], $explode[1], $map_id, MAP_ID);
+					$new_position = $explode[0].$delimetr.$explode[1].$delimetr.$explode[2];
+					
+					if(isset(static::$_terrain[$new_position]))
+						throw new Error('позиция '.$new_position.' ('.$position.') карты '.$map_id.' ('.$side.', '.$maps[$map_id]['width'].'x'.$maps[$map_id]['height'].') повторяется в обзей матрице');	
+					
+					static::$_terrain[$new_position] = [];
+				}
+			}	
+		}	
+		
+		if(APP_DEBUG)
+			PHP::log('Создадим матрицу с округлением позиции до единицы и указанияем куда из конкретной локации можно попасть  и какая для этого дистанция');
+		
+		// после того как собрали все воедино пройдемся еще раз что бы создать выходы из созданных локаций  и померить дистанции
+		foreach(static::$_terrain as $position=>&$variants)
+		{
+			$explode = explode($delimetr, $position);
+
+			// в отличие от матрицы World position мира здесь собираем клетки в которые мы можем ходить (тк мы можем ходить и на пол клетки но в матрице World будет она округляться до целой)
+			for($forward_x=round(STEP*-1);$forward_x<=round(STEP*1);$forward_x+=round(STEP))
+			{
+				for($forward_y=round(STEP*-1);$forward_y<=round(STEP*1);$forward_y+=round(STEP))
+				{
+					if($forward_x == 0 && $forward_y == 0) continue;
+					$tile = ($explode[0] + $forward_x).$delimetr.($explode[1] + $forward_y).$delimetr.$explode[2];
+					
+					// если позиция свободна то из текущей добавим путь в нее и из нее в текущую
+					if(isset(static::$_terrain[$tile]))
+					{
+						// дистанция 
+						$variants[$tile] = true;
+					}						
+				}	
+			}	
+		}
+		if(APP_DEBUG)
+			PHP::log('Матрица текущей и смежных карт создана '.print_r(array_keys(static::$_terrain), true));		
+	}
+	
 	public static function sides():array
 	{
 		return static::$_sides;
@@ -100,101 +181,25 @@ final class Map2D
 	public static function getCurrentMapTiles():array
 	{
 		return static::$_current;	
-	}
-
-	public static function init(array $sides, array $maps)
-	{
-		if(!DEFINED('MAP_ID'))
-			throw new Error('не указана текущая карта и сервер карты не запущен');		
-		
-		if(isset(static::$_sides))
-			throw new Error('Матрица карты уже была создана');
-		
-		// конкретно для этого фреймворка ничего кроме высоты и ширины карты в пикселях не нужно (хотя там есть в массиве и войства произвольные слоев и тайлов но это все сугубо индивидуально для реализации в конкретной игре)
-		foreach($maps as $map_id=>$map)
-		{
-			static::$_info[$map_id] = ['width'=>$map['width'], 'height'=>$map['height']];
-		}
-		
-		if(APP_DEBUG)
-			PHP::log('Начинаем создавать матрицу 2D карты при инициализации');
-		
-		// сначало текущую карту созддим матрицу областей
-		static::$_terrain = static::$_current = static::getTerrain($maps[MAP_ID]);
-		
-		if(APP_DEBUG)
-			PHP::log('Собираем координаты текущей и соседних (со смещением в относительно текущей сетку координат) локаций');
-		
-		$delimetr = Position::DELIMETR;
-		if(static::$_sides = $sides)
-		{
-			// если карта не указана возвращаем центральную со смежными областями
-			foreach($sides as $map_id=>$side)
-			{
-				if($map_id == MAP_ID) continue;
-				
-				if(APP_DEBUG)
-					PHP::log('дополним матрицу игровой карты смежной локацией '.$map_id);
-		
-				$map = $maps[$map_id];
-				foreach(array_keys(static::getTerrain($map)) as $position)
-				{
-					$explode = explode($delimetr, $position);
-					
-					static::encode2dCoord($explode[0], $explode[1], $map_id, MAP_ID);
-					$new_position = $explode[0].$delimetr.$explode[1].$delimetr.$explode[2];
-					
-					if(isset(static::$_terrain[$new_position]))
-						throw new Error('позиция '.$new_position.' ('.$position.') карты '.$map_id.' ('.$side.', '.$map['width'].'x'.$map['height'].') повторяется в обзей матрице');	
-					
-					static::$_terrain[$new_position] = [];
-				}
-			}	
-		}	
-		
-		if(APP_DEBUG)
-			PHP::log('Создадим матрицу с округлением позиции до единицы и указанияем куда из конкретной локации можно попасть  и какая для этого дистанция');
-		
-		// после того как собрали все воедино пройдемся еще раз что бы создать выходы из созданных локаций  и померить дистанции
-		foreach(static::$_terrain as $position=>&$variants)
-		{
-			$explode = explode($delimetr, $position);
-
-			// в отличие от матрицы World position мира здесь собираем клетки в которые мы можем ходить (тк мы можем ходить и на пол клетки но в матрице World будет она округляться до целой)
-			for($forward_x=round(STEP*-1);$forward_x<=round(STEP*1);$forward_x+=round(STEP))
-			{
-				for($forward_y=round(STEP*-1);$forward_y<=round(STEP*1);$forward_y+=round(STEP))
-				{
-					if($forward_x == 0 && $forward_y == 0) continue;
-					$tile = ($explode[0] + $forward_x).$delimetr.($explode[1] + $forward_y).$delimetr.$explode[2];
-					
-					// если позиция свободна то из текущей добавим путь в нее и из нее в текущую
-					if(isset(static::$_terrain[$tile]))
-					{
-						// дистанция 
-						$variants[$tile] = true;
-					}						
-				}	
-			}	
-		}
-		if(APP_DEBUG)
-			PHP::log('Матрица текущей и смежных карт создана '.print_r(static::$_terrain, true));		
 	}	
 	
 	// соберем сетку тайловую текущей карты исключим непроходимые области (все объекты)
-	private static function getTerrain(array $map)
+	private static function getTerrain(array &$map)
 	{	
 		$objects = array();
 		// получим все препятствия
-		foreach($map['tileset'] as $tileset)
+		foreach($map['tileset'] as &$tileset)
 		{
-			foreach($tileset['tile'] as $tile)
+			if(!empty($tileset['tile']))
 			{
-				// если есть физика у тайла в наборе
-				if(!empty($tile['objects']))
+				foreach($tileset['tile'] as &$tile)
 				{
-					$objects[$tile['tile_id']] = $tile['objects'];
-				} 	
+					// если есть физика у тайла в наборе
+					if(!empty($tile['objects']))
+					{
+						$objects[$tile['tile_id']] = $tile['objects'];
+					} 	
+				}	
 			}	
 		} 			
 		
@@ -205,35 +210,35 @@ final class Map2D
 		$delimetr = Position::DELIMETR;
 
 		// сначала соберем все препятсвия со всех смежных ярусов в слоях
-		foreach($map['layer'] as $layer)
+		foreach($map['layer'] as &$layer)
 		{
 			// не првоеряем какая там ширина высота у объекта - если он в рамках тайла то вся эта клетка непроходима
-			if(!empty($layer['tiles']) && $objects)
+			if(!empty($layer['tiles']))
 			{
-				foreach($layer['tiles'] as $tile)
+				foreach($layer['tiles'] as $tile_num=>&$tile)
 				{
-					if(!empty($objects[$tile['tile_id']]))
+					if(!empty($objects[$tile['tile_id']]) || strtolower($layer['name'])=='collision')
 					{	
-						$x = $tile['num'] % $map['columns'];
-						if($y = intdiv($tile['num'] , $map['columns']))
+						$x = $tile_num % $map['columns'];
+						if($y = intdiv($tile_num , $map['columns']))
 							$y *= -1;
 						
-						$coliders[(int)$layer['offsetz']][$y.$delimetr.$x] = true;	
+						$coliders[(int)$layer['offsetz']][$x.$delimetr.$y] = true;	
 					}
 				}						
 			} 
 			
 			// todo пройти по всем остальным объектам и сделать из всех их область препятсвий
-			if(!empty($layer['objects']))
+			if(!empty($layer['objects']) && $layer['visible'])
 			{
-				foreach($layer['objects'] as $object)
+				foreach($layer['objects'] as &$object)
 				{
 					if(!$object['visible'] || !empty($object['polyline'])) continue;
 					
 					$polygons[(int)$layer['offsetz']][$num] = new Polygon2D();
 					if(!empty($object['polygon']))
 					{
-						foreach($object['polygon'] as $point)
+						foreach($object['polygon'] as &$point)
 						{
 							// переведем абсолютные координаты полигона на карте в номера тайла по x и y 
 							$polygons[(int)$layer['offsetz']][$num]->addPoint($point['x']/$map['tilewidth'], $point['y']/$map['tileheight']);
@@ -264,35 +269,40 @@ final class Map2D
 		// принимаем во внимание что на клиенте идет расчет по x и y, те идя вверх y увиличиваются а вниз уменьшается (тоже и про x - влево уменьшается, вправо увеличивается)
 		
 		$links = array();
-		foreach($map['layer'] as $layer)
+		foreach($map['layer'] as &$layer)
 		{
 			// может не ыть и слой являться слоем объектов
 			if(!empty($layer['tiles']))
 			{
-				foreach($layer['tiles'] as $tile)
-				{
-					$x = $tile['num'] % $map['columns'];
-					if($y = (intdiv($tile['num'] , $map['columns'])))
-						$y *= -1;
-				
-					if(isset($coliders[(int)$layer['offsetz']][$x.$delimetr.$y])) continue;
-					
-					// если эта область проходима можем туда двигаться
-					if(!empty($polygons[(int)$layer['offsetz']]))
+				for($y=0; $y<$map['height']; $y++)											// высота карты
+				{		
+					for($x=0; $x<$map['width']; $x++)										// ширина карты
 					{
-						foreach($polygons[(int)$layer['offsetz']] as $polygon)
+						$num = $x+$y*$map['width'];
+						if($y)
+							$posy = $y*-1;
+						else
+							$posy = $y;
+							
+						if(!isset($layer['tiles'][$num]) || isset($coliders[(int)$layer['offsetz']][$x.$delimetr.$posy])) continue;
+						
+						// если эта область проходима можем туда двигаться
+						if(!empty($polygons[(int)$layer['offsetz']]))
 						{
-							// если в этом полигоне наша позиция которую обрабатываем тидем на следуюющий тайл - это уже недоступен, нет смысла перебора других объектов
-							if($polygon->contains($x, $y))
-								continue(2);										
+							foreach($polygons[(int)$layer['offsetz']] as $polygon)
+							{
+								// если в этом полигоне наша позиция которую обрабатываем тидем на следуюющий тайл - это уже недоступен, нет смысла перебора других объектов
+								if($polygon->contains($x, $posy))
+									continue(2);										
+							}
 						}
-					}
-					$links[$x.$delimetr.$y.$delimetr.(int)$layer['offsetz']] = [];
+						$links[$x.$delimetr.$posy.$delimetr.(int)$layer['offsetz']] = [];					
+					}				
 				}						
 			} 	
 		}	
 		array_multisort(array_keys($links), SORT_NATURAL, $links);
-
+								
 		return $links;
 	}
 }

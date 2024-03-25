@@ -13,16 +13,11 @@ trait AddMethodsTrait
 		static::$_methods[$name] = $callable;		
     }
 	
-	final public function __call($name, $args) 
-	{
-		return static::__callStatic($name, $args);
-    }		
-	
 	// обязательно они должны повторять код, тк если тут будет в функции $this  - выдасться ошибка. а в __call - нет 
-	final public static function __callStatic($name, $args) 
+	public static function __callStatic(string $name, array $arguments) 
 	{
 		if(isset(static::$_methods[$name]))
-			return call_user_func_array(static::$methods[$name], $args);
+			return call_user_func_array(static::$methods[$name], $arguments);
 		else
 			throw new Error('Метод '.$name.' не существует в классе');
     }	

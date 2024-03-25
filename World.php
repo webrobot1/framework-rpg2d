@@ -1,165 +1,144 @@
 <?php
 // класс для работы с открытым миром и  добавления в нее объектов
 // это статическая коллекция существ
-abstract class World 
+abstract class World extends Channel
 {
 	use AddMethodsTrait;
 	
 	private static array $_entitys 		= array();				// коллеция существ
 	
-	private static array $_codes 		= array();				// код срабатываемый при загрузки сущеностей
+	private static array $_entitys_closures;					// код срабатываемый при загрузки сущеностей
 	private static Closure $_position_trigger;					// код срабатываемый при смене позиции
 		
 	private static array $_positions 	= array();				// что бы не перебирать ВСЕ объекты методом filter - сделаем матрицу где ключ - позиция объекта и перебираем только нужные		
 	private static array $_remove = array();					// массив существ к удалению (сразу удалять нельзя из масива существ тк надо их изменения собрать еще)
 	
-
-	private function __construct(){}
-
 	// добавить код который сработает на сущность 
 	//	при доблавении или удалении
 	//	при смене ее координат - этот метод запускается при старте game Server передавая в песочницу этот код который берет из базы в админ панели записанный
-	public static function init(array $list, array $info)
+	public final static function init(array $codes, ?Closure $positions)
 	{
-		if(APP_DEBUG)
-			PHP::log('Инициализация кода смены позиций');
-			
-		if(!empty($info['code']))
+		if(isset(self::$_entitys_closures))
+			throw new Error('Инициализация игровой системы уже была произведена');
+
+		if((self::$_entitys_closures = $codes) && APP_DEBUG)
 		{
-			try
-			{
-				static::$_position_trigger = eval('return static function(EntityAbstract $object, ?Position $old = null):void{
-					'.$info['code'].'  
-				};');	
-			}
-			catch(Throwable $ex)
-			{
-				throw new Error('code(position): Ошибка компиляции кода изменения позиции '.$ex);
-			}				
-		}
-		
-		if(APP_DEBUG)
-			PHP::log('Инициализация типов и кода добавления/удаления существ');
-	
-		// Предупреждения в отличие от стандартного поведения в PHP теперь вызывают исключения EventException
-		// тк для игры предупреждения не допустимы - они пишутся в лог занимают время за сам факт того что они есть
-		// плюс расшифровка их логов если оставить из стандартно для всяких предупреждений из eval затруднительна , а для EventException уже есть решения
-		set_error_handler(function($errno, $errstr, $errfile, $errline)
-		{
-			if($errno != 0)
-				throw new ErrorException($errstr, 0, $errno, $errfile, $errline);
-		});
-		
-		foreach($list as $entity_type=>$entity)
-		{
-			foreach(['in', 'out'] as $type)
-			{
-				// создадим из текстовой версии кода которая нам пришла замыкание которое можно будет вызывать при сменен компонет а
-				if(!empty($entity[$type]['code']))
+			foreach(self::$_entitys_closures as $entity_type=>$codes)
+			{			
+				foreach($codes as $type=>$code)
 				{
-					if(APP_DEBUG)
-						PHP::log('Создаем триггер '.$type.' для сущности '.$entity_type);
-					
-					try
-					{
-						static::$_codes[$entity_type][$type] = eval('return static function(EntityAbstract $object'.($type=='out'?', ?int $new_map':'').'):void{ 
-								'.$entity[$type]['code'].' 
-						};');	
-					}
-					catch(Throwable $ex)
-					{
-						throw new Error('code('.$entity_type.'/'.$type.'): Ошибка компиляции кода сущности '.$ex);
-					}	
+					PHP::log('Инициализация кода '.$type.' существ типа '.$entity_type);
 				}
 			}
 		}
+		
+		if($positions)
+		{
+			if(APP_DEBUG)
+				PHP::log('Инициализация кода смены позиции');
+					
+			self::$_position_trigger = $positions; 
+		}
+							
+		if(APP_DEBUG)
+			PHP::log('Инициализация типов и кода добавления/удаления существ');
 	}
 
 	// возвращает ключ созданного существа или null если существо создается на другой карте и появится в следующей снхронизации с ней (в следующих картах) - если нужно повесить события передавайте их сразу
-	public static function add(EntityAbstract $entity):string
+	public final static function add(EntityTypeEnum $type, array $data):EntityAbstract|string|null
 	{
-		if (array_key_exists($entity->key, static::$_entitys)) 
-		{
-			throw new Error('сущность '.$entity->key.' уже есть в группе');
-		}
-		
 		if(Block::$objects)
 			throw new Error('Стоит запрет на добавление новых существ во избежание зацикливание');
 		
-		if(APP_DEBUG)
-			$entity->log('добавления сущности '.$entity->key.' в мир '.($entity->map_id != MAP_ID?$entity->map_id.' локации'.($entity->remote_update?' на исполнение':' на очередь'):''));
+		if(empty($data['map_id']))
+			throw new Error('При создании сущности не указана карта для которой требуется эту сущность создать (можно создавать и на соседних) в пакете'.print_r($data, true)); 
 		
-		if($entity->map_id==MAP_ID || $entity->remote_update)
-		{		
+		$class = ucfirst($type->value);	
+		if(!empty(self::$_entitys_closures[$type->value]['in']))
+		{
+			try
+			{
+				// запретим добавления новых объектов тк это вызовет зацикливание если уже не
+				$recover = Block::current();
+				Block::$objects = true;	
+							
+				$closure = &self::$_entitys_closures[$type->value]['in'];
+				if($entity = $closure($type, $data))
+				{			
+					if(!($entity instanceOf $class))
+						throw new Error('Существо должно быть экземпляром класса '.$class.' созданное из массива '.print_r($data));
+				}
+				else
+				{
+					if($data['map_id']!=MAP_ID)
+						throw new Error('Нельзя отменить создание копии сущности другой локации в текущей');
+					
+					if(APP_DEBUG)
+						$entity->log('Отменено создание сущности '.$entity->key.' добавляемую в текущую локацию ');
+					
+					return null;
+				}
+			}
+			finally
+			{
+				// вернем все как было
+				Block::recover($recover);
+			}
+		}
+		else
+		{
+			$entity = new $class(...$data);
+		}
+	
+		if($data['map_id']==MAP_ID || !empty($data['permament_update']))
+		{	
 			if($entity->map_id == MAP_ID)
 			{
 				// при добавлении на карту (не путать с временем созданием сущности) тригернем компоненты (будто они все изменили значения что бы сработал их код пользовательский). именно тригер а не перезапись одного и того же
 				// именно так передаем значение тк другие компоненты могли уже его поменять и мы не сможем сравнить по ним входим ли в игру сейчас
 				foreach($entity->components->keys() as $name) $entity->components->trigger($name, $entity->components->get($name));
-
-				if(!empty(static::$_codes[$entity->type]['in']))
-				{
-					try
-					{
-						// запретим добавления новых объектов тк это вызовет зацикливание если уже не
-						$recover = Block::current();
-						Block::$objects = true;	
-									
-						$closure = &static::$_codes[$entity->type]['in'];
-						$closure($entity);
-					}
-					finally
-					{
-						// вернем все как было
-						Block::recover($recover);
-					}
-				}
 			}
 
-			static::$_entitys[$entity->key] = $entity;
-			static::addPosition($entity->key);
+			self::$_entitys[$entity->key] = $entity;
+			self::addPosition($entity->key);
+
+			if(APP_DEBUG)
+				$entity->log('добавления сущности '.$entity->key.' в мир '.($entity->map_id != MAP_ID?$entity->map_id.' локации'.($entity->permament_update?' на исполнение':' на текущей локации'):''));
+		
+			return $entity;
 		}
 		// если существо для другой локации просто отправим на нее пакет что мы хотим его создать не рассылая ничего
 		else
 		{
-			static::create_remote_entity($entity);
+			parent::create_remote_entity($entity);
 			$entity->__destruct();
-		}
-
-		return $entity->key;
+			
+			if(APP_DEBUG)
+				$entity->log('Добавление '.$entity->key.' на очередь доблавения на локацию '.$entity->map_id);
+			
+			return $entity->key();
+		}	
 	}		
 
-	// создание сущности на лругой лкоации - через код API или при переходе
-	private static function create_remote_entity(EntityAbstract $entity, ?int $map_id = null)
+	public final static function isRemove(string $key):bool
 	{
-		$data = array();
-		$data = $entity->toArray();
-
-		if($privates_components = $entity->components->privates())
-			$data['components'] = array_replace_recursive($data['components']??[], $privates_components);
-	
-		Channel::create_remote_entity($entity->key, $data, $map_id);
-	}	
-
-	public static function isRemove(string $key):bool
-	{
-		return array_key_exists($key, static::$_remove);
+		return array_key_exists($key, self::$_remove);
 	}
 	
-	public static function remove(string $key, int $new_map = null):void
+	public final static function removeEntity(string $key, int $new_map_id = null):void
 	{
-		if(isset(static::$_entitys[$key]))
+		if(isset(self::$_entitys[$key]))
         {   
-			if(!static::isRemove($key))
+			if(!self::isRemove($key))
 			{
-				$entity = static::get($key);
+				$entity = self::get($key);
 
-				if(!$entity->remote_update && $entity->map_id != MAP_ID)
+				if(!$entity->permament_update && $entity->map_id != MAP_ID)
 					throw new Error('нельзя напрямую удалять существ с другой карты');      
 				
-				if($new_map)
+				if($new_map_id)
 				{
-					if($new_map == MAP_ID)
+					if($new_map_id == MAP_ID)
 						throw new Error('нельзя удалить с пометкой о переходе на новую карту если она равна текущей');
 					
 					if($entity->map_id!=MAP_ID)
@@ -167,17 +146,17 @@ abstract class World
 				}
 				
 				if(APP_DEBUG)
-					$entity->log('добавление в очередь на удаление сущености '.($entity->map_id!=MAP_ID?' с другой карты':'').($new_map?' по причине перехода на новую карту '.$new_map:''));
+					$entity->log('добавление в очередь на удаление сущености '.($entity->map_id!=MAP_ID?' с другой карты':'').($new_map_id?' по причине перехода на новую карту '.$new_map_id:''));
 				 
-				static::$_remove[$key] = $new_map;
+				self::$_remove[$key] = $new_map_id;
 
 				// если пришло пакетом с другой локации не ставим изменением
 				if($entity->map_id==MAP_ID)
 				{
-					if(!empty(static::$_codes[$entity->type]['out']))
+					if(!empty(self::$_entitys_closures[$entity->type->value]['out']))
 					{
-						$closure = &static::$_codes[$entity->type]['out'];
-						$closure($entity, $new_map);
+						$closure = &self::$_entitys_closures[$entity->type->value]['out'];
+						$closure($entity, $new_map_id);
 					}
 					
 					$entity->setChanges(['action'=>SystemActionEnum::ACTION_REMOVE], EntityChangeTypeEnum::All);
@@ -189,39 +168,39 @@ abstract class World
             throw new Error('сущность '.$key.' не может быть удалена по причине отсутствия ее в коллекции');
 	}		
 	
-	public static function count():int
+	public final static function count():int
 	{
-		return count(static::$_entitys);
+		return count(self::$_entitys);
 	}
 
-	public static function keys():array
+	public final static function keys():array
 	{
-		return array_keys(static::$_entitys);
+		return array_keys(self::$_entitys);
 	}	
 	
-	public static function all():array
+	public final static function all():array
 	{
-		return static::$_entitys;
+		return self::$_entitys;
 	}
 
 	
-	final public static function isset(string $key):bool
+	public final static function isset(string $key):bool
 	{
-		return isset(static::$_entitys[$key]);		
+		return isset(self::$_entitys[$key]);		
 	}
 
-	public static function get(string $key):EntityAbstract
+	public final static function get(string $key):EntityAbstract
 	{
-		if(!isset(static::$_entitys[$key]))
+		if(!isset(self::$_entitys[$key]))
 			throw new Error('Сущности '.$key.' не существует');
 			
-		return static::$_entitys[$key];		
+		return self::$_entitys[$key];		
 	}
 	
 	// в матрице существа хранятся в клетках размером с тайл (1х1 в системе координат) хотя ходить могут и на пол клетки и на полторы и тд
-	public static function addPosition(string $key, Position $old_value = null)
+	public final static function addPosition(string $key, Position $old_value = null)
 	{
-		if(!$entity = static::$_entitys[$key])
+		if(!$entity = self::$_entitys[$key])
 			throw new Error('Сущности '.$key.' не найдено для доблавения ее в матрицу позиций');
 		
 		$tile = $entity->position->tile();
@@ -236,19 +215,19 @@ abstract class World
 			(
 				(!$trace = debug_backtrace(!DEBUG_BACKTRACE_PROVIDE_OBJECT | DEBUG_BACKTRACE_IGNORE_ARGS, 2)) 
 					|| 
-				(($trace[1]['class']!=static::class || $trace[1]['function']!='add') && ($trace[1]['class']!=EntityAbstract::class || $trace[1]['function']!='__set'))
+				(($trace[1]['class']!=self::class || $trace[1]['function']!='add') && ($trace[1]['class']!=EntityAbstract::class || $trace[1]['function']!='__set'))
 			)
 				throw new Error('Запуск кода смены позиции можно лишь ишь при добавлении существа в World или при изменении данных '.print_r($trace, true));
 		}
 		
 		// это должно быть именно тут , не в Position (тк метод update может вызываться принудительно минуя свойство ->position)
 		if($old_value)
-			static::removePosition($key, $old_value);
+			self::removePosition($key, $old_value);
 		
-		static::$_positions[$tile][$key] = $key;
+		self::$_positions[$tile][$key] = $key;
 
 		// это вызовет триггер кода смены позиций 
-		if($entity->map_id == MAP_ID && !empty(static::$_position_trigger) && !static::isRemove($key))
+		if($entity->map_id == MAP_ID && !empty(self::$_position_trigger) && !self::isRemove($key))
 		{
 			if(APP_DEBUG)
 				$entity->log('запустим триггер песочницы изменения позиции');
@@ -259,7 +238,7 @@ abstract class World
 				Block::$positions = true;			// запрет менять координаты
 				Block::$objects = true;				// запрет добавление объектов
 			
-				call_user_func(static::$_position_trigger, $entity, $old_value);
+				call_user_func(self::$_position_trigger, $entity, $old_value);
 			}
 			finally
 			{
@@ -270,7 +249,7 @@ abstract class World
 	
 	private static function removePosition(string $key, Position $old_value)
 	{
-		if(!$entity = static::$_entitys[$key])
+		if(!$entity = self::$_entitys[$key])
 			throw new Error('Сущности '.$key.' не найдено для удаления ее из матрицы позиций');
 		
 		$tile = $old_value->tile();
@@ -278,11 +257,11 @@ abstract class World
 		if(APP_DEBUG)
 			$entity->log('удаление с позиции '.$tile);
 		
-		if(isset(static::$_positions[$tile][$key]))
+		if(isset(self::$_positions[$tile][$key]))
 		{
-			unset(static::$_positions[$tile][$key]);		
-			if(empty(static::$_positions[$tile]))
-				unset(static::$_positions[$tile]);
+			unset(self::$_positions[$tile][$key]);		
+			if(empty(self::$_positions[$tile]))
+				unset(self::$_positions[$tile]);
 		}
 	}	
 
@@ -303,23 +282,23 @@ abstract class World
 				else
 					$new_position = $position->add(new Position($x, $y))->tile();
 
-				if(!empty(static::$_positions[$new_position]))
+				if(!empty(self::$_positions[$new_position]))
 				{
-					foreach(static::$_positions[$new_position] as $key)
+					foreach(self::$_positions[$new_position] as $key)
 					{
-						if(!isset(static::$_entitys[$key]))
+						if(!isset(self::$_entitys[$key]))
 							throw new Error($key.': Существо отмечено на локации '.$new_position.' , но отсутвует в коллекции');
 						
 						if($filter)
 						{ 
-							$return = $filter(static::get($key));
+							$return = $filter(self::get($key));
 							if(!is_bool($return))
 								throw new Error('Функции фильтрации существ на карте должны возвращать значение типа bool (true или false)');
 
 							if(!$return)
 								continue;	
 						}					
-						$array[$key] = static::get($key);
+						$array[$key] = self::get($key);
 						
 						if($count && count($array)==$count)
 							return $array;	
@@ -331,77 +310,69 @@ abstract class World
 	}
 	
 	// включает в себя сбор изменений, их рассылку и удаление сущностей
-	public static function refresh()
+	protected final static function refresh()
 	{
-		if(static::count())
+		if(self::count())
 		{
-			if(static::$_remove)
+			if(self::$_remove)
 			{
 				if(APP_DEBUG)
 					PHP::log('отправка в websocket пакетов удаления и перехода существ с игрового сервера');
 
-				foreach(static::$_remove as $key=>$new_map)
+				foreach(self::$_remove as $key=>$new_map)
 				{
-					if($new_map && static::$_entitys[$key]->map_id != MAP_ID)
+					if($new_map && self::$_entitys[$key]->map_id != MAP_ID)
 						throw new Error('Удаление сущности по причине смены карты должно происходить на его родной локации');
 					
 					if(APP_DEBUG)
 					{
 						if($new_map)
-							static::$_entitys[$key]->log("перемещение на карту ".$new_map);
+							self::$_entitys[$key]->log("перемещение на карту ".$new_map);
 						else
-							static::$_entitys[$key]->log("удаление с карты");
+							self::$_entitys[$key]->log("удаление с карты");
 					}
 					
-					if(static::$_entitys[$key]->map_id == MAP_ID)
+					if(self::$_entitys[$key]->map_id == MAP_ID)
 					{	
-						if(static::$_entitys[$key]->type == EntityTypeEnum::Players->value)
+						if($new_map && !(self::$_entitys[$key] instanceOf Players))
 						{									
-							static::$_entitys[$key]->save($new_map);
 							if(APP_DEBUG)
-								static::$_entitys[$key]->log("сохранен при выходе из игры");
+								self::$_entitys[$key]->log("Отправка пакета о переходе с карты ".MAP_ID." на ".$new_map);
 							
-							Channel::player_remove($key);							
-						}
-						elseif($new_map)
-						{
-							if(APP_DEBUG)
-								static::$_entitys[$key]->log("Отправка пакета о переходе с карты ".MAP_ID." на ".$new_map);
-							
-							static::create_remote_entity(World::get($key), $new_map);	
+							parent::create_remote_entity(World::get($key), $new_map);	
 						}
 					}
 					
-					unset(static::$_remove[$key]);
-					static::removePosition($key, static::$_entitys[$key]->position);
+					unset(self::$_remove[$key]);
+					self::removePosition($key, self::$_entitys[$key]->position);
 					
-					static::$_entitys[$key]->__destruct();
+					self::$_entitys[$key]->__destruct();
 
-					unset(static::$_entitys[$key]);
+					unset(self::$_entitys[$key]);
 				}	
 			}	
 		}		
 	}
 
 	// подготовим для game server массив изменений существ
-	public static function collected():array
+	protected final static function collected():array
 	{	
 		// подготавливаем данные для отправки только если на нашем сервере кто то есть (в тч  не жиилые NPC данные которых меняют соседние локации на которых кто то есть живой)
 		$publish = [];
 		// первый раз пройдемся что бы полуичить что в игровом мире изменилось
-		foreach(static::$_entitys as $key=>$entity)
+		foreach(self::$_entitys as $key=>$entity)
 		{	
 			// проверим изменился ли объект что бы его отправить
 			if($changes = $entity->getChanges())
 			{					
-				$publish = array_replace_recursive($publish, static::formatChanges($entity->key, $entity->type, $entity->map_id, $changes));	
+				$publish = array_replace_recursive($publish, self::formatChanges($entity->key, $entity->type->value, $entity->map_id, $changes));	
 			}					
 		}
 
 		if($publish)	
-			Channel::send_changes($publish);
+			parent::send_changes($publish);
 
-		return Channel::collected();		
+		return parent::collected();		
 	}
 
 	private static function formatChanges(string $key, string $entity_type, int $map_id, array $data):array

@@ -82,30 +82,49 @@ class Position extends IPosition
 	// проложит луч и вернемт информацию есть ли препятсвия по пути луча/ по умолчанию препятсвия - только непроходимые области на карте (части карты)
 	public function raycast(Position $to, callable $filter = null): bool
     {
-		if($this->distance($to)>0)
+		$old_distance = $this->distance($to);
+		if($old_distance>0)
 		{
 			if(empty($filter))
 			{
-				$filter = function (Position $new_position):bool
-				{
+				$filter = static function (Position $new_position):bool
+				{	
 					if(!empty(Map2D::getTile($new_position->tile())))
 						return true;
 					else
+					{
 						return false;	
+					}
 				};
 			}
 		
 			$new_position = $this;
-			$forward = $this->forward($to);
+			$forward = $new_position->forward($to);
 
-			while(($new_position = $new_position->next($forward)) && $new_position->tile() != $to->tile())
+			//if(APP_DEBUG)
+			//	PHP::log('Создаем луч из '.(string)$new_position.' в '.(string)$to.' с направлением '.$forward);
+
+			while(($new_position = $new_position->next($forward)) && $new_position->tile() != $to->tile() && ($new_distance = $new_position->distance($to)))
 			{	
+				//if(APP_DEBUG)
+				//	PHP::log('Перемешаем луч в '.(string)$new_position.' (дистанция '.(string)$new_distance.')');
+				
+				if($new_distance>$old_distance)
+				{
+					PHP::warning('Луч из '.(string)$this.'  с направлением '.(string)$forward.' пролетел мимо конечной точки '.(string)$to);
+					return false;
+				}
+		
 				$result = $filter($new_position);
 				
-				if(!is_bool($result)) throw new Error('Функция обратного вызова raycast  должна возвращать тип занчения bool');
+				if(!is_bool($result)) 
+					throw new Error('Функция обратного вызова raycast  должна возвращать тип занчения bool');
+				
+				$old_distance = $new_distance;
 				
 				// как только не найденная локация возвращаем false (не проходимость)
-				if(!$result) return false;
+				if(!$result) 
+					return false;
 			}
 		}
 		return true;

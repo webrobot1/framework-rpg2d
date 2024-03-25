@@ -2,31 +2,33 @@
 // Осторожно! родительский класс сущностей. все методы создания сущностей и вспомогательные тут. здесь стараться ничего не менять
 // все поля приватные. Ничего не должно меняться внутри этого родительского класса после __construct без попадания в changes
 abstract class EntityAbstract 
-{	
+{
 	private array $_changes = [];							// последнии изменения в объектах - рассылается игрокам и вмежным локациям
-
 	public readonly int $id;								// публичное тк ненужно отправлять в клиент и не нужно через магические методы проганять (тк оно и не меняется)
 	public readonly string $key;						
-	public readonly string $type;						
-	private readonly int $map_id;							// карту поменять нельзя, при смене ее только рассылаются изменения (только при отключение существа и перезаписи в бд можно менять)
-
-	// бывает между событиями нужно переносить какой то буфер который нельзя и не нужно ставить как парметр события (например замыкания создавать) и надо что бы они удалялись с удалением существа.
-	// в качестве прмиера когда это нужно смоттрите код события fight/bolt  где я кеширую созданные через eval замыкания (тк каждый раз создавать их долго) или move/walk/to  где поиск пути кеширую
-	public array $buffer = array();							
-
-	// только для чтения что бы не переопределять их а только менять свойства
-	private readonly Position $position;
-	private readonly Forward $forward;
+	public readonly EntityTypeEnum $type;	
 	
-	private readonly Components $components;							// компоненты заполняются после инициализации объекта что бы дернулся их код lua с заполненным _G['objects']							
-	private readonly Events $events;					   				// объект  Event управляющий событиями пришедших от клиента или добавленные вручную создается в режиме сервера работы при добалении в колецию World
-	private bool $remote_update = false;
-	
+	public readonly string $login;							// только для игроков
+	public string $ip; 
+	public ?float $ping;
+
+	private bool $permament_update = false;	
+	public array $buffer = array();							// бывает между событиями нужно переносить какой то буфер который нельзя и не нужно ставить как парметр события
+															// в качестве прмиера я кеширую последний обработанный поиск пути существа в событии move/walk/to
+		
+	# поля нже protected что бы можно было переопделеить классы обрабатывающие их
+	protected readonly Position $position;					// возможно к переопределению
+	protected readonly Forward $forward;	
+	protected readonly Components $components;				// компоненты заполняются после инициализации объекта что бы дернулся их код lua с заполненным _G['objects']							
+	protected readonly Events $events;					   	// объект  Event управляющий событиями пришедших от клиента или добавленные вручную создается в режиме сервера работы при добалении в колецию World
+														
+
 	// объявим общие обязательные параметры
 	public function __construct
 	(
+		private readonly int $map_id,					// карту поменять нельзя, при смене ее только рассылаются изменения (только при отключение существа и перезаписи в бд можно менять)
 		private string $prefab,	
-		
+
 		private float $x,							
 		private float $y,							
 		private float $z,
@@ -42,69 +44,57 @@ abstract class EntityAbstract
 		private ?string $action = null,		
 		private ?string $created = null,
 	
-		?int $map_id = null,							// может быть null когда карта удаляется с сервера
 		?int $id = null,								// может быть null когда новое что то добавляется на сервер	
 		
 		array $components = array(),														
 		array $events = array(),
 
-		bool $remote_update = null,					// если true то этому существу можно обновить данные в текущий момент	
+		bool $permament_update = null,						// если true то этому существу можно обновить данные в текущий момент
+		
+		string $login = null, 							// только для игроков
+		string $ip = null, 
+		?float $ping  = null,
+		
 		...$arg											// все остальное что не нужно или новые поля что забыли задейстсвать (что бы не упал сервер)
 	)
 	{
-		if (PHP_SAPI !== 'cli') 
-			throw new Error("Запуск возможен только в режиме CLI сервера");	
-		
-		if(Block::$objects)
-			throw new Error('Стоит запрет на добавление новых существ во избежание зацикливание');		
-		
 		if(!DEFINED('MAP_ID'))
 			throw new Error('не определена карта сервера MAP_ID');
 		
 		if(!empty($arg))
 			throw new Error('неизвестные поя создания сущности '.print_r($arg, true));
 		
+		$this->type = static::getType();
+		
 		if(empty($id))
 		{
+			if($this instanceOf Players)
+				throw new Error('Нельзя создавать сущность игрока без индентификатора');
+			
 			$id = hrtime(true);
 			
 			// до тех пор пока не будет уникальным на карте наш id мы прибавляем 
-			while(World::isset(static::getKey($id)))
+			while(World::isset(self::getKey($id)))
 			{
 				$id++;	
 			}	
 		}
-		elseif(World::isset(static::getKey($id)))
+		elseif(World::isset(self::getKey($id)))
 		{
-			throw new Error('Существо '.static::getKey($id).' уже существует в коллекции мира и не может быть создано снова');
+			throw new Error('Существо '.self::getKey($id).' уже существует в коллекции мира и не может быть создано снова');
 		}
 			
 		$this->id = $id;
-		$this->key = static::getKey($this->id);
-		$this->type = static::getType();
-		
-		if(!$map_id)
-		{
-			$map_id = $this->map_id = MAP_ID;	
-			if(APP_DEBUG)
-				$this->log('установлена карта текущего сервера');
-		}
-		else
-			$this->map_id = $map_id;
-		
-		if($remote_update)
-			$this->__set('remote_update', $remote_update);
+		$this->key = self::getKey($this->id);
+	
+		if($permament_update)
+			$this->setPermamentUpdate(true);
 		
 		if(!$action)
 			$this->action = SystemActionEnum::ACTION_LOAD;
 		elseif($action == SystemActionEnum::ACTION_REMOVE)
 			throw new Error('существо '.$this->key.' '.($this->map_id != MAP_ID?'с другой локации':'').' не может быть создано с пометкой action что оно удаляется');					
 				
-
-		// посмотрим случайные позиции с указанной карте или текущей если не указана
-		if(!$tiles = Map2D::getCurrentMapTiles())
-			throw new Error('Нет ниодной свободной клетки без физики');
-		
 		try
 		{
 			$forward = new Forward($this->forward_x, $this->forward_y, $this->forward_z);			
@@ -118,8 +108,13 @@ abstract class EntityAbstract
 			$this->forward_z = 0;	
 		}
 		
-		$this->forward 	= new Forward(object: $this);
-				
+		if(!isset($this->position))
+			$this->position	 = new Position(object: $this);
+		
+		if(!isset($this->forward))
+			$this->forward 	= new Forward(object: $this);
+			
+			
 		// пока все под 2Д
 		//(int)  обязательно может вернуть -0
 		$tile = (int)round($this->x).Position::DELIMETR.(int)round($this->y).Position::DELIMETR.(int)round($this->z);
@@ -143,22 +138,20 @@ abstract class EntityAbstract
 				}		
 			}
 		}
-	
-		$this->position	 = new Position(object: $this);	
-
-		//	проверим локальные позиции свободны ли	
-		if($this->map_id!=MAP_ID && !Map2D::getTile($this->position->tile()))
+		else
 		{
-			throw new Error('При создании копии существа '.$this->key.' с удаленной локации '.$this->map_id.' переданы позиция '.$this->position->tile().'  не сущеcтвующие в матрице для этой локации');
-		}
+			if(empty(Map2D::sides()[$this->map_id]))
+				throw new Error('Карта '.$this->map_id.' для создаваемого существа отсутвует не принадлежит центральной ('.MAP_ID.') или смежной из списка '.implode(',', array_keys(Map2D::sides())));
 		
-		if($this->map_id!=MAP_ID && empty(Map2D::sides()[$this->map_id]))
-			throw new Error('Карта '.$this->map_id.' для создаваемого существа отсутвует не принадлежит центральной ('.MAP_ID.') или смежной из списка '.implode(',', array_keys(Map2D::sides())));	
-		
+			//	проверим локальные позиции свободны ли	
+			if(!Map2D::getTile($this->position->tile()))
+				throw new Error('При создании копии существа '.$this->key.' с удаленной локации '.$this->map_id.' переданы позиция '.$this->position->tile().'  не сущеcтвующие в матрице для этой локации');
+		}	
+
 		if(APP_DEBUG)
 		{
 			if($this->map_id!=MAP_ID)
-				$this->log('создается объект сущности '.(!$remote_update?'c':'для').' другой карты ('.$this->map_id.')');
+				$this->log('создается объект сущности '.(!$permament_update?'c':'для').' другой карты ('.$this->map_id.')');
 			else 
 				$this->log('создание объекта сущности для текущей карты');
 		}
@@ -170,70 +163,67 @@ abstract class EntityAbstract
 				$this->log('Подготовим общие (без свойств и компонентов) данные нового существа как изменения для рассылки всем игрокам и смежным локациями');
 			
 			$this->setChanges($this->toArray(), EntityChangeTypeEnum::All);
-		}			
-		
+		}					
+				
 		// события и компоненты дополнят changes внутри себя при инициализации
-		// события строго первыми тк код компонентов может првоерять наличие тех или иных событий
-		$this->events = new Events($this, $events);
-		$this->components = new Components($this, $components);			
-	}	
-	
-	// какие колонки выводить в методе toArray и которые можно изменить из вне класса
-	public static function columns():array
-	{
-		return array				
-		(	  						
-			'id'=>true,	
-			'prefab'=>true,	
-			'action'=>true,
-			'sort'=>true,
-
-			'x'=>true,							
-			'y'=>true,							
-			'z'=>true,
-			
-			// эти три поля меняются по отдельности только существам с другой локации, для текущих нужно создавать объект IPosition заного 
-			'forward_x'=>true,							
-			'forward_y'=>true,	
-			'forward_z'=>true,	
-			
-			'lifeRadius'=>true,
-			
-			'components'=>true,								
-			'events'=>true,								
-															
-			'map_id'=>true,						
-			'created'=>true
-		);	
+		if(!isset($this->events))
+			$this->events = new Events($this, $events);
+		
+		// тригер компонентов нового существа сработает только когда существо будет добавляться на сцену (в момент  World::add)
+		if(!isset($this->components))
+			$this->components = new Components($this, $components);	
 	}
 	
-	private function position_columns():array
+	// Возвращает обе части для ключа Redis
+	public final static function getKey(int $id):string
 	{
-		return ['position'=>true, 'forward'=>true];
+		return static::getType()->value.EntityTypeEnum::SEPARATOR.$id;
 	}
 	
-	// магические методы позволят из вне получать данные и меняя их писать что они поменялись в changes
-	final public function __get(string $key):mixed
-	{
-		if((isset(static::columns()[$key]) || isset($this->position_columns()[$key]) || $key == 'remote_update') && property_exists($this, $key)) 
-			return $this->$key;	
-		else
-			throw new Error('нельзя получить поле '. $key);
+	abstract protected static function getType():EntityTypeEnum;
+	
+	public final function remove(?int $new_map_id = null)
+	{	
+		World::removeEntity($this->key, $new_map_id);
 	}
 	
-	
-	final public function __isset(string $key):bool
+	public final function __isset(string $key):bool
 	{
 		return $this->__get($key)!=null?true:false;
 	}
 
-	public function remove()
-	{	
-		World::remove($this->key);
+	// магические методы позволят из вне получать данные и меняя их писать что они поменялись в changes
+	public final function __get(string $key):mixed
+	{
+		if(isset(static::columns()[$key]) || (isset(self::position_columns()[$key]) || $key == 'permament_update') && property_exists($this, $key)) 
+			return $this->$key;	
+		else
+			throw new Error('нельзя получить поле '. $key);
 	}
+
+	public function setPermamentUpdate(bool $value)
+	{
+		if(
+			APP_DEBUG 
+				&&
+			// может быть указано либо при создании существа через 
+			//	RemoteCommand->
+			//  RemoteCommand->World->EntityAbstract->
+			//  RemoteCommand->World->closure->EntityAbstract->  
+			
+			((!$trace = array_column(debug_backtrace(!DEBUG_BACKTRACE_PROVIDE_OBJECT | DEBUG_BACKTRACE_IGNORE_ARGS, 6), 'class', 'class')) || empty($trace[RemoteCommand::class]))
+		)
+			throw new Error('параметр существа указывающий что существо обновляется пакетом с удаленной локации нельзя менять вручную '.print_r($trace, true));
 		
+		
+		if(MAP_ID == $this->map_id)
+			throw new Error('нельзя устанавливать параметр существа указывающий что существо обновляется пакетом с удаленной локации когда его карта текущая');
+		
+		$this->permament_update = $value;
+	}
+
 	// этот метод нужен только для вызова из update_from_remote_location из RemoteCommand с параметром  remote_command	
-	final public function __set(string $key, mixed $value):void
+	public final function __set(string $key, mixed $value):void
 	{
 		// то только в таймауте тк незачем в приципе там менять свойства сущности
 		if(World::isset($this->key) && Block::$object_change && Block::$object_change!=$this->key)
@@ -241,39 +231,21 @@ abstract class EntityAbstract
 		
 		#Perfomance - исключительно что бы убыстрить доступ к данным (при записи скорость таже, а при чтении х2)
 		$map_id = $this->map_id;
-		$remote_update = &$this->remote_update;
+		$permament_update = $this->permament_update;
 		
-		if($key == 'remote_update')
-		{
-			if(
-				APP_DEBUG 
-					&&
-				// может быть указано либо при создании существа через RemoteCommand->...->EntityAbstract->__construct->__set или RemoteCommand->EntityAbstract->__set
-				((!$trace = debug_backtrace(!DEBUG_BACKTRACE_PROVIDE_OBJECT | DEBUG_BACKTRACE_IGNORE_ARGS, 4)) || ($trace[1]['class'] != RemoteCommand::class && $trace[3]['class'] != RemoteCommand::class))
-			)
-				throw new Error('параметр существа указывающий что существо обновляется пакетом с удаленной локации нельзя менять вручную '.print_r($trace, true));
-		    
-			if(MAP_ID == $map_id)
-                throw new Error('нельзя устанавливать параметр существа указывающий что существо обновляется пакетом с удаленной локации когда его карта текущая');
-			
-			$remote_update = $value;
-			return;
-		}
-		
-		if(!$remote_update && MAP_ID != $map_id) 
+		if(!$permament_update && MAP_ID != $map_id) 
 			throw new Error('Нельзя напрямую менять параметры ('.$key.') существа с другой локации');		
 		
-		$new_map_id = null;
-		if((isset(static::columns()[$key]) || isset($this->position_columns()[$key])) && $key!='events' && $key!='components')
+		if((isset(static::columns()[$key]) || isset(self::position_columns()[$key])) && $key!='events' && $key!='components')
 		{
 			// отправляем в клиент только если изменилось значение или action (он может несколько раз повторятся)
-			if($key=='action' || (isset($this->position_columns()[$key]) && ($position_array = $value->toArray()) != $this->$key->toArray()) || (isset(static::columns()[$key]) && $this->$key != $value))
+			if($key=='action' || (isset(self::position_columns()[$key]) && ($position_array = $value->toArray()) != $this->$key->toArray()) || (isset(static::columns()[$key]) && $this->$key != $value))
 			{
 				if(APP_DEBUG)
-					$this->log('изменение поля '.$key.' на '.$value.($remote_update?' в режиме синхронизации локации с '.$map_id:''));	
+					$this->log('изменение поля '.$key.' на '.$value.($permament_update?' в режиме синхронизации локации с '.$map_id:''));	
 				
 				// изменение координат через привыоение ->position = new Position(...)
-				if(isset($this->position_columns()[$key]))
+				if(isset(self::position_columns()[$key]))
 				{
 					// пакеты с position или forward не могут приходить из вне и меняться
 					if($map_id != MAP_ID)
@@ -282,7 +254,7 @@ abstract class EntityAbstract
 					if(Block::$positions)
 						throw new Error('Стоит запрет на изменение координат во избежание зацикливание');
 					
-					if(is_a($value, Position::class))
+					if($value instanceOf Position)
 					{
 						// если мы меняем position проверим есть ли песочница при запуске смены координат
 						// именно тк что бы посчиталась правильная позиция ровная с учетом положения
@@ -301,7 +273,7 @@ abstract class EntityAbstract
 							// Зная что там магический метод вызовем его напрямую
 							$coord = 'forward_'.$coord;
 						}
-						elseif(!is_a($value, Position::class))
+						elseif(!($value instanceOf Position))
 							throw new Error('Значение свойства '.$key.' не является объектом позиции');
 						
 						$this->$coord = $coord_value;
@@ -309,7 +281,7 @@ abstract class EntityAbstract
 					}
 
 					// если существо под удалением ничего уже не меняем ему
-					if(is_a($value, Position::class))
+					if($value instanceOf Position)
 					{
 						World::addPosition($this->key, $old_position);
 					}
@@ -371,7 +343,7 @@ abstract class EntityAbstract
 									throw new Error('нельзя перещаться с текущей карты на текущую');
 								
 								$this->setChanges([$key=>$value], EntityChangeTypeEnum::All);
-								World::remove($this->key, $value);	
+								$this->remove($value);	
 							}
 
 						// именно выходим из функции, не break!
@@ -389,34 +361,74 @@ abstract class EntityAbstract
 			throw new Error($this->key.': нельзя изменить поле '. $key);
 	}
 	
+	// какие колонки выводить в методе toArray и которые можно изменить из вне класса
+	// publiс тк для remotу commands требуется
+	public static function columns():array
+	{
+		$columns = array				
+		(	  						
+			'id'=>true,	
+			'prefab'=>true,	
+			'action'=>true,
+			'sort'=>true,
+
+			'x'=>true,							
+			'y'=>true,							
+			'z'=>true,
+			
+			// эти три поля меняются по отдельности только существам с другой локации, для текущих нужно создавать объект IPosition заного 
+			'forward_x'=>true,							
+			'forward_y'=>true,	
+			'forward_z'=>true,	
+			
+			'lifeRadius'=>true,
+			
+			'components'=>true,								
+			'events'=>true,								
+															
+			'map_id'=>true,						
+			'created'=>true
+		);
+
+		return $columns;		
+	}
+	
+	private static function position_columns():array
+	{
+		return ['position'=>true, 'forward'=>true];
+	}
 	
 	// todo сделать что бы это сразу вносилось в глобальный кеш World для отправки (тк там и есть данные удаления сущнсоти котоыре не снять уже после самого ее удаления тк нет $this)
-	public function setChanges(array $changes, EntityChangeTypeEnum $type)
+	public final function setChanges(array $changes, EntityChangeTypeEnum $type)
 	{
 		if(empty($changes))
 			throw new Error('Изменения существа '.$this->key.' не могут быть пустым массивом');
 		
-		if($type==EntityChangeTypeEnum::Players && ($denied = array_intersect_key($changes, static::columns())))
+		$player_change_type = EntityChangeTypeEnum::Players;
+		$events4remote_change_type = EntityChangeTypeEnum::Events4Remote;
+		
+ 		if($type==$player_change_type && ($denied = array_intersect_key($changes, static::columns())))
 			throw new Error('нельзя отправлять пакет изменений у существа '.$this->key.' типа '.$type->value.' у которого содержаться поля сущености тк рассылка идет всем игрокам '.print_r($denied, true));	
 		
-		if($type!=EntityChangeTypeEnum::Players && ($denied = array_diff_key($changes, static::columns())))
+		if($type!=$player_change_type && ($denied = array_diff_key($changes, static::columns())))
 			throw new Error('нельзя отправлять пакет изменений у существа '.$this->key.' не связанных с полями сущности '.print_r($denied, true));	
-		
-		// для существ с других карт можем менять лишь события Events4Remote
-		if($this->map_id != MAP_ID && $type != EntityChangeTypeEnum::Events4Remote)
-			throw new Error('Нельзя пометить пакет измнений у существа '.$this->key.' с другой локации иначе чем '.EntityChangeTypeEnum::Events4Remote->value);		
-		
-		if($type == EntityChangeTypeEnum::Events4Remote)
+		 
+		if($type == $events4remote_change_type)
 		{
 			if(empty($changes['events']) || count($changes)>1)
 				throw new Error('Пакет изменений '.$type->value.' у существа '.$this->key.' не может содержать что то кроме пакетов событий'.print_r($changes, true));	
 			
 			// для неигроков данные приватныех событий NPC пихаем в Private, тк во избежание ошибок мы проверяем в websocket сервере что бы если с текущей лкоации то там были только игроков события
-			if($this->map_id == MAP_ID && $this->type != EntityTypeEnum::Players->value)
+			if($this->map_id == MAP_ID && $this->type != EntityTypeEnum::Players)
 				throw new Error($this->key.' не является существом с другой локации и не является игроком для рассылки пакета изменений типа'.$type->value.' '.print_r($changes, true));		
 		}
+		// для существ с других карт можем менять лишь события Events4Remote
+		elseif($this->map_id != MAP_ID)
+			throw new Error('Нельзя пометить пакет измнений у существа '.$this->key.' с другой локации иначе чем '.$events4remote_change_type);	
 		
 		$change_type = $type->value;
+		
+		// todo сделать уровни логирования тк этот лог очень тормозит особенно при создании существ на 30% 
 		if(APP_DEBUG)
 			$this->log('внесены изменения '.$change_type.' группу рассылки '.print_r($changes, true));	
 		
@@ -428,8 +440,7 @@ abstract class EntityAbstract
 			$not_changes = array();
 			$finish_events = array();
 			$local_changes[$change_type] = Data::compare_recursive($local_changes[$change_type], $changes, $not_changes, $finish_events);
-				
-/* 			
+						
 			// если более 1й группы то в других могут остаться пакеты для завершенного события (они удалялились только в своей группе при вызове update_recursive)
 			if($finish_events && count($local_changes)>1)
 			{
@@ -442,13 +453,15 @@ abstract class EntityAbstract
 						
 						if(isset($changes['events'][$event]))
 						{
-							unset($changes['events'][$event]);
+							// полностью не удаляем тк там time что нужен (оставшееся время ГРУППЫ события)
+							unset($changes['events'][$event]['data']);
+							unset($changes['events'][$event]['from_client']);
 							if(APP_DEBUG)
 								$this->log('обнулено из данных группы рассылки '.$type.' событие '.$event.' в связи с обнулением его в группе в '.$change_type);
 						}
 					}	
 				}	
-			} */
+			} 
 			
 			if(APP_DEBUG && $not_changes)
 				$this->log('после уникализации удалены следующие изменения '.print_r($not_changes, true));			
@@ -458,17 +471,14 @@ abstract class EntityAbstract
 			// не страшно ели там events с обнуленным actin - сервер еще раз проверит пакет и тут уже будет излишни тратить время на првоерки
 			$local_changes[$change_type] = $changes;
 		}
-	}	
-	
+	}
+
 	// todo заменить на spl очередь забирая из нее что бы удалялось
-	final public function getChanges():array
+	public function getChanges():array
 	{	
 		if($changes = $this->_changes)
 		{		
-			if(APP_DEBUG)
-				$this->log('запрошены текущие изменения '.print_r($changes, true));	
-		
-			$this->_changes = array();	
+			$this->_changes = [];
 			$change_type = EntityChangeTypeEnum::All->value;
 		
 			if($this->map_id == MAP_ID && Map2D::sides() && !World::isRemove($this->key))
@@ -482,20 +492,97 @@ abstract class EntityAbstract
 						if(APP_DEBUG)
 							$this->log('запросим дополнительные изменения в связи с '.($new_map_id == MAP_ID?'выходом за границы карты (недостаточного для перехода на другую локацию)':'переходом на новую карту'));
 						
-						$changes = array_replace_recursive($changes, $this->_changes);	
-						$this->_changes = array();							
+						$changes = array_replace_recursive($changes, $this->_changes);
+						$this->_changes = [];						
 					}
 				}							
 			}
-		}
-			
+		}		
 		return $changes;
+	}
+	
+	// возвращает какие свойства текущего класса могут быть возвращены в виде массива
+	// PS все итерируемые объекты у нас - это коллекции а не массивы (в C# имеет значение) поэтому если пусто подаем null а не пустой массив
+	// Никакими другими интераторами обектов не пользуемся тк Очень медленное !
+	// todo можно сделать как с приватными копонентами и не перебирать если сохранен статический массив со ссылками (но тогда надо будет загружать разом все события с time = null )
+	// Внимание! возвращает се события и компоненты в тч скрытые
+	public final function toArray():array
+    {
+		$return = array();
+		foreach(static::columns() as $key=>$bool)
+		{
+			if(!isset($this->$key)) continue;
+			
+			switch($key)
+			{
+				case 'events':
+					$return[$key] = null;
+					if($this->$key !== null)
+					{
+						foreach($this->$key->all() as $name=>$value)
+						{
+							$return[$key][$name] = $value->toArray();
+						}
+					}	
+				break;	
+				case 'components':
+					$return[$key] = null;
+					if($this->$key !== null)
+					{
+						// не шлем компоненты помеченные в админп анели как скрытые для рассылки другим. хотя в коде lua  доступны все
+						foreach(Components::list($this->type) as $name => $component)
+						{
+							// не шлем компоненты значение которых null и дефолтное значение null (но 0 или пустую строку можем еслиувафгде и равен null)
+							if($component['isSend'] && (($value = $this->$key->get($name)) || $component['default']!==null || $value!==null))
+								$return[$key][$name] = $value;
+						}
+					}
+				break;
+				
+				default:
+					$return[$key] = $this->$key;
+				break;
+			}		
+		}
+		
+		if(APP_DEBUG)
+			$this->log('запрос на преобразование в массив '.print_r($return, true));	
+		
+        return $return;   
+    }
+	
+	public function save(?int $new_map_id = null)
+	{
+		if($this->map_id != MAP_ID) 
+			throw new Error('Сохранение существ находящихся на другой карте запрещено');
+		
+		if(APP_DEBUG)
+			$this->log('сохранение существа');	
+		
+		// перед запросом данных на сохранение проверим не ушли ли мы с локации и не нужно ли нам координаты подробвнять (может чуть за пределы вышли, но при этом не достаточно что бы считался как переход)
+		// мы это же делаем при рассылки изменений но вот тут надо тоже тк можем в текущем кадре перейти на локацию или выйти чуть за пределы		
+		if(!$new_map_id)
+		{
+			if(($new_map_id = $this->checkLeave()) && $new_map_id == MAP_ID)
+				$new_map_id = null;
+		}
+		
+		if($new_map_id)
+		{
+			if($new_map_id == MAP_ID) 
+				throw new Error('Нельзя сохранить существо с пометкой о новой карте когда она равна текущей');
+		
+			if(APP_DEBUG)
+				$this->log('заменяем игроку карту при сохранении');
+		}	
+
+		PHP::save($this->type, $this->key, $new_map_id);	
 	}
 	
 	// проверка на уход с карты осуществляется в самом конце, после получения изменений существа (тк в процессе кадра может меняться и координаты и карта - например существо толкнут за пределы карты карты но вызовется телепор и все в одном событие кадра)
 	// +  и долго при каждой смене позиции проверять поэтому тут разово
 	// todo можно рекурсивно вызывать ее проверяя и сдвигая на соседние карты существо
-	protected final function checkLeave():?int
+	private function checkLeave():?int
 	{
 		if($this->map_id != MAP_ID)
 			throw new Error($this->key.': нельзя проверять на уход с текущей локоации сущест которые принадлежат к другим локациям');	
@@ -630,86 +717,27 @@ abstract class EntityAbstract
 		return $new_map_id;		
 	}
 	
-	abstract protected static function getType():string;	
-
-	// Возвращает обе части для ключа Redis
-	private static function getKey(int $id):string
-	{
-		return static::getType().EntityTypeEnum::SEPARATOR.$id;
-	}		
-
-	// возвращает какие свойства текущего класса могут быть возвращены в виде массива
-	// PS все итерируемые объекты у нас - это коллекции а не массивы (в C# имеет значение) поэтому если пусто подаем null а не пустой массив
-	// Никакими другими интераторами обектов не пользуемся тк Очень медленное !
-	// todo можно сделать как с приватными копонентами и не перебирать если сохранен статический массив со ссылками (но тогда надо будет загружать разом все события с time = null )
-	// Внимание! возвращает се события и компоненты в тч скрытые
-	public function toArray():array
-    {
-		$return = array();
-		foreach(static::columns() as $key=>$bool)
-		{
-			if(!isset($this->$key)) continue;
-			
-			switch($key)
-			{
-				case 'events':
-					$return[$key] = null;
-					if($this->$key !== null)
-					{
-						foreach($this->$key->all() as $name=>$value)
-						{
-							$return[$key][$name] = $value->toArray();
-						}
-					}	
-				break;	
-				case 'components':
-					$return[$key] = null;
-					if($this->$key !== null)
-					{
-						// не шлем компоненты помеченные в админп анели как скрытые для рассылки другим. хотя в коде lua  доступны все
-						foreach(Components::list(EntityTypeEnum::from($this->type)) as $name => $component)
-						{
-							// не шлем компоненты значение которых null и дефолтное значение null (но 0 или пустую строку можем еслиувафгде и равен null)
-							if($component['isSend'] && (($value = $this->$key->get($name)) || $component['default']!==null || $value!==null))
-								$return[$key][$name] = $value;
-						}
-					}
-				break;
-				
-				default:
-					$return[$key] = $this->$key;
-				break;
-			}		
-		}
-		
-		if(APP_DEBUG)
-			$this->log('запрос на преобразование в массив '.print_r($return, true));	
-		
-        return $return;   
-    }
-	
-				
 	// функция вызывающаяся при вызове НЕ статичного ->log nr тут нам нужен this->map
-	final public function log(string|array $comment):void
+	public function log(string|array $comment):void
 	{
 		$comment = $this->key.($this->map_id != MAP_ID?' (с локации '.$this->map_id.')':'').': '.(is_array($comment)?print_r($comment, true):$comment);
 		PHP::log($comment);
 	}	
 
 	// функция вызывающаяся при вызове НЕ статичного ->log nr тут нам нужен this->map
-	final public function warning(string|array $comment):void
+	public function warning(string|array $comment):void
 	{
 		$comment = $this->key.($this->map_id != MAP_ID?' (с локации '.$this->map_id.')':'').': '.(is_array($comment)?print_r($comment, true):$comment);
 		PHP::warning($comment);
 	}
 	
-	function __clone():void
+	public final function __clone():void
 	{
 		throw new Error('Клонирование объекта существа запрещено');
 	}
 	
 	// если этого не делать будет утечка памяти при удалении существа с карты тк ссылка останется тут	
-	function __destruct()
+	public final function __destruct()
 	{	
 		if(!empty($this->forward))
 			$this->forward->__destruct();		

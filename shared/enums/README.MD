@@ -1,0 +1,1 @@
+Это общие Enum с Websocket , Game, Sandbox (поэтмоу кстати без namespace и папка к ним указана в composer)

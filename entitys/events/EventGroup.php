@@ -12,16 +12,18 @@ class EventGroup
 	private float $_time;										// до какого времени таймаут (распространяется не на определенный action а на событие, а если нало то нужно разные actiob выносить в отдельные группу ), учтено время работы события и время до момента обработник объекта
 	private array $_timeout_cache = array();					// кеш последних таймаутов. что бы не спамить одними и теми же таймаутами
 
+	private static array $_closures;							// коды таймаутов
+
 	function __construct(protected EntityAbstract $object, public readonly string $name)
 	{	
 		#Perfomance - прямая ссылка на свойство убыстрит получение данных X2 (за счет отсутствия постоянного обращение к объекту)
-		$object_type = $this->object->type;
+		$object_type = $this->object->type->value;
 		
 		if(!isset(Events::list()[$this->name]['entitys'][$object_type]))
 			throw new Error('событие '.$this->name.' не разрешено для '.$object_type);
 	
 		if(APP_DEBUG)
-			$this->log('создание группы событий');
+			$this->log('создание новой группы событий');
 		
 		// если событие новое накинем пару мс что бы NPC не одновременно отрабатвали
 		if($object_type != EntityTypeEnum::Players->value && $this->object->map_id == MAP_ID)
@@ -35,7 +37,18 @@ class EventGroup
 		else
 			$this->resetTime();
 	}
-
+	
+	public static function init(array $closures)
+	{
+		if(isset(static::$_closures))
+			throw new Error('Инициализация групп событий уже была произведена');
+		
+		if(APP_DEBUG)
+			PHP::log('Инициализация кода таймаута групп событий');
+		
+		static::$_closures = $closures;
+	}
+	
 	// метод обнуляет текущее событие (происходит когда оно попадает на исполнение по времени таймаута)
 	public function finish():void
 	{	
@@ -72,14 +85,14 @@ class EventGroup
 				$this->log('удаления (remove)');
 		
 			#Perfomance - экономит доли миллисекунды за счет отуствия постоянного обращение к свойствам объекта (везде пихать нет смысла, а только там где более 1 раза идет обращение)
-			$remote_update = $this->object->remote_update;
+			$permament_update = $this->object->permament_update;
 			$is_another_map = ($this->object->map_id!=MAP_ID?$this->object->map_id:null);
 			
 
 			$data = ['events'=>[$this->name=>['action'=>'']]];
-			if(!$is_another_map || !$remote_update)
+			if(!$is_another_map || !$permament_update)
 			{	
-				$player_type = EntityTypeEnum::Players->value;
+				$player_type = EntityTypeEnum::Players;
 				$private_change_type = EntityChangeTypeEnum::Privates;
 				
 				if(!$is_another_map && Events::list()[$this->name]['sending'] > EventSendingEnum::None->value)
@@ -94,7 +107,7 @@ class EventGroup
 			}
 
 			// если пытаемся событие удалить существу с другого сервера то только отправляем пакет выше, но фактически не меняем
-			if(!$is_another_map || $remote_update)
+			if(!$is_another_map || $permament_update)
 				$this->event = null;			
 		}		
 	}
@@ -116,9 +129,9 @@ class EventGroup
 		
 		#Perfomance - это экономия долей миллисекунды но тем не менее экономия за счет отсутвия обращения к обхектам
 		$is_event_exists = !empty($this->event);
-		$remote_update = $this->object->remote_update;
+		$permament_update = $this->object->permament_update;
 		$is_another_map = ($this->object->map_id!=MAP_ID?$this->object->map_id:null);
-		$player_type = EntityTypeEnum::Players->value;
+		$player_type = EntityTypeEnum::Players;
 		
 		
 		### Внимание! ниже уже Exception при которых сервер не падает а отключатеся только клиент ###
@@ -152,11 +165,11 @@ class EventGroup
 			throw new Exception('неизвестные параметры события '.$this->name.'/'.$action.' ('.implode(',', array_keys(Events::list()[$this->name]['methods'][$action]['params'])).') '.implode(',', array_keys($data)));
 			
 		// если мы через код дтбляем событие то ничего не создаме а просто оптравится пакет изменений (но из другого сервера может прийти пакет что их существу с другой карты чью копия у нас тут м хотим установить новое событие)
-		if(!$is_another_map || $remote_update)
+		if(!$is_another_map || $permament_update)
 		{
 			$this->event = new Event($action, $new_data, $from_client);	
 			if(APP_DEBUG)
-				$this->log('новое событие '.($from_client?'от клиента':'системой'), dump: $new_data);	
+				$this->log('новое событие в группе обновлено '.($from_client?'от клиента':'системой'), dump: $new_data);	
 		}
 		else
 		{
@@ -166,7 +179,7 @@ class EventGroup
 		}
 					
 		// если событие для существа с текущей карты или мы отправляем команду на создание события существу с удаленной - тогда мы рассылаем, а если просто обновление данными существа с другой лкаоции то не рассылаем (уже игрокам разослали в WebSocket)
-		if(!$is_another_map || !$remote_update)
+		if(!$is_another_map || !$permament_update)
 		{
 			// как минимум action отправим
 			if(!$is_another_map)
@@ -236,14 +249,14 @@ class EventGroup
 	public function resetTime(float $seconds = 0):float
 	{		
 		if($seconds<0)
-			throw new Error('добавленные секундые на который сбвсавыется таймаут от текущего времени должно быть положительным числом или нулем, '.$seconds.' указано');
+			throw new Error('добавленные секундые на который сбрасывают таймаут от текущего времени должно быть положительным числом или нулем, '.$seconds.' указано');
 
 		#Perfomance - это экономия долей миллисекунды но тем не менее экономия за счет отсутвия обращения к объекту
-		$remote_update = $this->object->remote_update;
+		$permament_update = $this->object->permament_update;
 		$is_another_map = ($this->object->map_id!=MAP_ID?$this->object->map_id:null);
 		$player_type = EntityTypeEnum::Players->value;
 		
-		if(isset($this->_time) && !$remote_update)
+		if(isset($this->_time) && !$permament_update)
 			$remain = $this->remainTime();
 		
 		$seconds = round($seconds, 3);
@@ -253,7 +266,7 @@ class EventGroup
 			$this->log('сдвиг '.($this->event?'текущего':'следующего').' времени события (+'.$seconds.' секунд)');
 		
 		// что бы не спамить памекатми и логами на события чьи паузы и так малы между событиями и игрок не поставил галочку Не отправлять оставшееся время в админке
-		if((!isset($remain) || $remain>=static::MIN_EVENT_TIME_SENDING && Events::list()[$this->name]['send_remain']) && (!$is_another_map || !$remote_update))	
+		if((!isset($remain) || $remain>=static::MIN_EVENT_TIME_SENDING && Events::list()[$this->name]['send_remain']) && (!$is_another_map || !$permament_update))	
 		{	
 			if(!$is_another_map && Events::list()[$this->name]['sending']>EventSendingEnum::None->value)    
 			{	
@@ -299,7 +312,7 @@ class EventGroup
 		if(Block::$timeout) 
 			throw new Error('сейчас запрещено вызывать функции расчета таймаута во избежания зацикливания с ранее вызванной');
 		
-		if($closure = &Events::list()[$this->name]['closure'])
+		if($closure = &static::$_closures[$this->name]??null)
 		{ 
 			// сохраним значения перед вызовом (тк таймаут всегда можно вызвать и какой то флаг мог быть true)	
 			$recover = Block::current();
@@ -332,7 +345,7 @@ class EventGroup
 		if(
 			$this->object->map_id == MAP_ID
 				&&
-			$this->object->type == EntityTypeEnum::Players->value 
+			($this->object instanceOf Players) 
 				&& 
 			(!isset($this->_timeout_cache[$this->name]) || abs($this->_timeout_cache[$this->name] - $value) >= static::MAX_CHANGE_TIMEOUT) 
 				&& 
@@ -399,7 +412,7 @@ class EventGroup
 			$return['data'] = $this->__get('data');
 			
 			// если событие нельзя вызвать вручную то и нет смысла слать этот флаг
-			if($this->object->type == EntityTypeEnum::Players->value && $this->object->map_id==MAP_ID && !empty(Events::list()[$this->name]['methods'][$return['action']]['isPublic']))
+			if(($this->object instanceOf Players) && $this->object->map_id==MAP_ID && !empty(Events::list()[$this->name]['methods'][$return['action']]['isPublic']))
 				$return['from_client'] = $this->event->from_client;
 		}
 		
@@ -410,7 +423,7 @@ class EventGroup
 	{
 		$this->object->log
 		(
-			$this->name.(!empty($this->event)?'/'.$this->event->action:'').': '.$text.($this->object->remote_update?' (синхронизация от удаленной локации '.$this->object->map_id.') ':'').($dump?' '.print_r($dump, true):'')
+			$this->name.(!empty($this->event)?'/'.$this->event->action:'').': '.$text.($this->object->permament_update?' (синхронизация от удаленной локации '.$this->object->map_id.') ':'').($dump?' '.print_r($dump, true):'')
 		);
 	}
 	

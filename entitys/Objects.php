@@ -1,8 +1,14 @@
 <?php
 class Objects extends EntityAbstract
 {	
-	protected static function getType():string
+	protected final static function getType():EntityTypeEnum
+    {
+        return EntityTypeEnum::Objects;
+    }
+	
+	// какие колонки выводить в методе toArray и которые можно изменить из вне класса
+	public final static function columns():array
 	{
-		return EntityTypeEnum::Objects->value;
-	}	
+		return parent::columns();	
+	}
 }
