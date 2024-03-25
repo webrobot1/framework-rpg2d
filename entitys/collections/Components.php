@@ -9,7 +9,7 @@ class Components extends AbstractCollection
 	function __construct(protected EntityAbstract $object, array $components = array())
 	{
 		parent::__construct();
-		
+
 		#Perfomance - экономит доли миллисекунды за счет отуствия постоянного обращение к свойствам объекта (везде пихать нет смысла, а только там где более 1 раза идет обращение)
 		$permament_update = $this->object->permament_update;
 		$object_type = $this->object->type->value;
@@ -26,12 +26,15 @@ class Components extends AbstractCollection
 		if(!empty(static::$_list[$object_type]))
 		{
 			if($permament_update && !$components)
-				throw new Error('нельзя переписать существам с другой лкоации компоненты пустым набором');
+				throw new Error('нельзя переписать существам с другой локации компоненты пустым набором когда для указанного типа есть список возможных');
 			
-			foreach($components as $name=>$value)
-			{
-				$this->add($name, $value);					
-			}
+			// заполним отсутвующие компоненты значениями по умолчанию
+            // сначала ТОЛЬКО добавляем компоненты со значениями которые пришли из вне или по умолчанию (в любом случае повесятся все значения)
+            foreach(static::$_list[$object_type] as $name=>$component)
+            {    
+                $value = (isset($components[$name])?$components[$name]:$component['default']);
+                $this->add($name, $value);    
+            }  
 		}
 		elseif($components)
 			throw new Error('для сущности '.$object_type.' не предусмотрено никаких компонентов указанны в инициализации Components::init(...), однако пришли значения ('.json_encode($components).')');
@@ -75,7 +78,7 @@ class Components extends AbstractCollection
 			if(empty(static::$_list[$object_type][$key]))
 				throw new Error('Компонент '.$key.' не разрешен для сущности '.$this->object->key.' с типом '.$object_type.print_r(static::$_list, true));
 			
-			return static::$_list[$object_type][$key]['default'];
+			throw new Error('Обращение к неизвестному копоненту '.$key.' у существа '.$this->object->key);
 		}
 		else	
 			return $this->values[$key];
