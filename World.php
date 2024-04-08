@@ -94,6 +94,13 @@ abstract class World extends Channel
 		{	
 			if($entity->map_id == MAP_ID)
 			{
+				// копоненты могут слать игроку send данные (например в calculateTimeoutCache) но в websocket должен сначала прийти пакет сущности игрок что бы ему слать что либо (а то вышлем пакет игроку которого еще и на сцене в клиенте нет) с данными по нему же самому
+				if($entity->type == EntityTypeEnum::Players)
+				{
+					// проверим изменился ли объект что бы его отправить
+					parent::send_changes(self::formatChanges($entity->key, $entity->type->value, $entity->map_id, $entity->getChanges()));
+				}
+				
 				// при добавлении на карту (не путать с временем созданием сущности) тригернем компоненты (будто они все изменили значения что бы сработал их код пользовательский). именно тригер а не перезапись одного и того же
 				// именно так передаем значение тк другие компоненты могли уже его поменять и мы не сможем сравнить по ним входим ли в игру сейчас
 				foreach($entity->components->keys() as $name) $entity->components->trigger($name, $entity->components->get($name));

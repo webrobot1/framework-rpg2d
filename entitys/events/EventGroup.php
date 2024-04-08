@@ -3,7 +3,7 @@
 // там где setChanges если это не существо с текущей карты - мы всегда высылаем пакеты (тк они пойдут для другого сервера)
 class EventGroup
 {	
-	private const MIN_EVENT_TIME_SENDING =  0.1;				// до скольки секунд оставшееся время до следующего события считать значительным что бы передавать на соседнюю локацию (и без этого там счетчики есть и будут использованы старые данные что событие готово)
+	private const MIN_EVENT_TIME_SENDING =  0.005;				// до скольки секунд оставшееся время до следующего события считать значительным что бы передавать на соседнюю локацию (и без этого там счетчики есть и будут использованы старые данные что событие готово)
 	private const MAX_CHANGE_TIMEOUT =  0.010;					// до скольки секунд изменение между прошлым таймаутом и текущим считать не значительным и не передавать на клиент для уменьшения пакета
 	
 	private ?Event $event = null;								// событие в очереди на обработку
@@ -16,6 +16,10 @@ class EventGroup
 
 	function __construct(protected EntityAbstract $object, public readonly string $name)
 	{	
+		// todo првоерять из базы список доступных событий для аккаунта и привязывать класс Lua скриптов
+		if(empty(Events::list()[$this->name]))
+			throw new Error('группы событий '.$this->name.' не существует для создании в коллекции сущности '.$this->object->key);
+		
 		#Perfomance - прямая ссылка на свойство убыстрит получение данных X2 (за счет отсутствия постоянного обращение к объекту)
 		$object_type = $this->object->type->value;
 		
@@ -68,7 +72,7 @@ class EventGroup
 		// если событине не постоянное то обнулим событие (а если посточнное выполнится с теми же данными)
 		if(!empty($this->event) && empty(Events::list()[$this->name]['methods'][$this->event->action]['isPersist']))
 			$this->remove();
-		elseif($this->remainTime()>=static::MIN_EVENT_TIME_SENDING && APP_DEBUG)
+		elseif(APP_DEBUG)
 		{
 			$this->log('завершение (finish) без удаления из списка к выполнению после таймаута');	
 		}
@@ -256,17 +260,18 @@ class EventGroup
 		$is_another_map = ($this->object->map_id!=MAP_ID?$this->object->map_id:null);
 		$player_type = EntityTypeEnum::Players->value;
 		
-		if(isset($this->_time) && !$permament_update)
-			$remain = $this->remainTime();
-		
-		$seconds = round($seconds, 3);
+		if($seconds = round($seconds, 3))
+		{
+			if(APP_DEBUG)
+				$this->log('сдвиг '.($this->event?'текущего':'следующего').' времени события (+'.$seconds.' секунд)');
+		}
+		elseif(APP_DEBUG)
+			$this->log('сброс '.($this->event?'текущего':'следующего').' времени события на текущее');
+			
 		$this->_time = microtime(true) + $seconds;
-		
-		if(APP_DEBUG)
-			$this->log('сдвиг '.($this->event?'текущего':'следующего').' времени события (+'.$seconds.' секунд)');
-		
+			
 		// что бы не спамить памекатми и логами на события чьи паузы и так малы между событиями и игрок не поставил галочку Не отправлять оставшееся время в админке
-		if((!isset($remain) || $remain>=static::MIN_EVENT_TIME_SENDING && Events::list()[$this->name]['send_remain']) && (!$is_another_map || !$permament_update))	
+		if((!$is_another_map || !$permament_update) && Events::list()[$this->name]['send_remain'] && ($this->remainTime()>=static::MIN_EVENT_TIME_SENDING))	
 		{	
 			if(!$is_another_map && Events::list()[$this->name]['sending']>EventSendingEnum::None->value)    
 			{	

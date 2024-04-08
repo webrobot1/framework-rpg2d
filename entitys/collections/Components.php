@@ -75,8 +75,8 @@ class Components extends AbstractCollection
 			#Perfomance - экономит доли миллисекунды за счет отуствия постоянного обращение к свойствам объекта
 			$object_type = $this->object->type->value;
 			
-			if(empty(static::$_list[$object_type][$key]))
-				throw new Error('Компонент '.$key.' не разрешен для сущности '.$this->object->key.' с типом '.$object_type.print_r(static::$_list, true));
+			if(isset(static::$_list[ComponentListEntityTypeEnum::All][$key]) && empty(static::$_list[$object_type][$key]))
+				throw new Error('Компонент '.$key.' существует, но не разрешен для сущности '.$this->object->key.' с типом '.$object_type.print_r(static::$_list, true));
 			
 			throw new Error('Обращение к неизвестному копоненту '.$key.' у существа '.$this->object->key);
 		}

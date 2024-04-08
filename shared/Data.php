@@ -100,7 +100,7 @@ final class Data
 				// action в сущности и может совпадать (он постоянно переписывается)
 				// action в events и может совпадать 
 				if(!isset($current_arrays[$level][$key]) || $current_arrays[$level][$key] != $content || (!$level && ($key=='action' || $key=='events')) || ($compare_key && $compare_key[0]=='events' && ($level<2 || ($level==2 && $key=='action'))))
-				{				
+				{	
 					// и мы не в data поле событий events 
 					// и не выше значения поля кпомонента в массиве static::$_components_max_compare_level
 					// иначе массив переписывается целиком
@@ -109,11 +109,20 @@ final class Data
 							&&
 						$content
 							&&	
-						(!$compare_key || $compare_key[0]!='events' || $level!=2 || $key!='data')		// поле data которое придет если оно не равно полностью ерезапишет что было
-							&&
-						(!$compare_key || $compare_key[0]!='components' || (!empty($current_arrays[$level][$key]) && ((!$max_level = (static::$_components_max_compare_level[($compare_key[1]??$key)]??null)) || $max_level > $level)))
+						(
+							!$compare_key
+								||
+							(		
+								($compare_key[0]!='events' || $level!=2 || $key!='data')		// поле data которое придет если оно не равно полностью ерезапишет что было
+									&&
+								($compare_key[0]!='components' || (!empty($current_arrays[$level][$key]) && ((!$max_level = (static::$_components_max_compare_level[($compare_key[1]??$key)]??null)) || $max_level > $level)))
+							)
+						)
 					)
 					{
+						if($compare_key && $compare_key[0]=='components')
+							echo '!!'.$level.'-'.implode($compare_key).'-'.$max_level.PHP_EOL;	
+					
 						$new_arrays[($level+1)] = &$new_arrays[$level][$key];
 						$current_arrays[($level+1)] = &$current_arrays[$level][$key];
 						$changes_arrays[($level+1)] = &$changes_arrays[$level][$key];

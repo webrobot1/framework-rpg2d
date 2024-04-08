@@ -175,7 +175,7 @@ abstract class EntityAbstract
 	}
 	
 	// Возвращает обе части для ключа Redis
-	public final static function getKey(int $id):string
+	private static function getKey(int $id):string
 	{
 		return static::getType()->value.EntityTypeEnum::SEPARATOR.$id;
 	}
@@ -239,7 +239,7 @@ abstract class EntityAbstract
 		if((isset(static::columns()[$key]) || isset(self::position_columns()[$key])) && $key!='events' && $key!='components')
 		{
 			// отправляем в клиент только если изменилось значение или action (он может несколько раз повторятся)
-			if($key=='action' || (isset(self::position_columns()[$key]) && ($position_array = $value->toArray()) != $this->$key->toArray()) || (isset(static::columns()[$key]) && $this->$key != $value))
+			if((isset(static::columns()[$key]) && ($this->$key != $value || $key=='action')) || (isset(self::position_columns()[$key]) && ($position_array = $value->toArray()) != $this->$key->toArray()))
 			{
 				if(APP_DEBUG)
 					$this->log('изменение поля '.$key.' на '.$value.($permament_update?' в режиме синхронизации локации с '.$map_id:''));	
@@ -404,6 +404,14 @@ abstract class EntityAbstract
 		if(empty($changes))
 			throw new Error('Изменения существа '.$this->key.' не могут быть пустым массивом');
 		
+		// не меняем action если существу удаляется (тк мы разослать должны это, но удалим только в следующем кадре)
+		if(!empty($changes['action']) && World::isRemove($this->key) && $changes['action']!=SystemActionEnum::ACTION_REMOVE)
+		{
+			unset($changes['action']);
+			if(empty($changes))
+				return;
+		}
+				
 		$player_change_type = EntityChangeTypeEnum::Players;
 		$events4remote_change_type = EntityChangeTypeEnum::Events4Remote;
 		

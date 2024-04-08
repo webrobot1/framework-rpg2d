@@ -246,15 +246,15 @@ final class Map2D
 					}
 					else
 					{	
-						if($object['width'] == $map['tilewidth'] && $object['height'] == $map['tileheight'])
+						if(($object['width']??$map['tilewidth']) == $map['tilewidth'] && ($object['height']??$map['tileheight']) == $map['tileheight'])
 							$coliders[(int)$layer['offsetz']][($object['x']/$map['tilewidth']).$delimetr.($object['y']/$map['tileheight'])] = true;
 						else
 						{
 							// все остальыне объекты (круги, tiled и квадраты кроме линий - это полигоны)
 							$polygons[(int)$layer['offsetz']][$num]->addPoint($object['x']/$map['tilewidth'], $object['y']/$map['tileheight']);
-							$polygons[(int)$layer['offsetz']][$num]->addPoint(($object['x'] + $object['width'])/$map['tilewidth'], $object['y']/$map['tileheight']);
-							$polygons[(int)$layer['offsetz']][$num]->addPoint(($object['x'] + $object['width'])/$map['tilewidth'], ($object['y']-$object['height'])/$map['tileheight']);
-							$polygons[(int)$layer['offsetz']][$num]->addPoint($object['x']/$map['tilewidth'], ($object['y']-$object['height'])/$map['tileheight']);
+							$polygons[(int)$layer['offsetz']][$num]->addPoint(($object['x'] + ($object['width']??$map['tilewidth']))/$map['tilewidth'], $object['y']/$map['tileheight']);
+							$polygons[(int)$layer['offsetz']][$num]->addPoint(($object['x'] + ($object['width']??$map['tilewidth']))/$map['tilewidth'], ($object['y']-($object['height']??$map['tileheight']))/$map['tileheight']);
+							$polygons[(int)$layer['offsetz']][$num]->addPoint($object['x']/$map['tilewidth'], ($object['y']-($object['height']??$map['tileheight']))/$map['tileheight']);
 						}
 					}
 

@@ -124,12 +124,6 @@ class Events extends AbstractCollection
 			throw new Error('группа события '.$group_name.' уже создано');
 		}
 			
-		// todo првоерять из базы список доступных событий для аккаунта и привязывать класс Lua скриптов
-		if(!$event = Events::list()[$group_name])
-		{
-			throw new Error('группы событий '.$group_name.' не существует для создании в коллекции сущности '.$this->object->key);
-		}
-		
 		$this->values[$group_name] = new EventGroup($this->object, $group_name);				
 	}
 		
