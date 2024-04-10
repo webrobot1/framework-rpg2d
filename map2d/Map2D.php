@@ -88,7 +88,9 @@ final class Map2D
 			}	
 		}
 		if(APP_DEBUG)
-			PHP::log('Матрица текущей и смежных карт создана '.print_r(array_keys(static::$_terrain), true));		
+			PHP::log('Матрица текущей и смежных карт создана '.print_r(array_keys(static::$_terrain), true));
+
+		DomainLogic::init(static::$_terrain);		
 	}
 	
 	public static function sides():array
