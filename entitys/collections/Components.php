@@ -162,8 +162,23 @@ class Components extends AbstractCollection
 		// при добавлении в объекты и если изменилось значение - вызовем тригер 
 		if($closure = &static::$_components_closures[$key]??null)
 		{	
-			if(APP_DEBUG && ((!$trace = debug_backtrace(!DEBUG_BACKTRACE_PROVIDE_OBJECT | DEBUG_BACKTRACE_IGNORE_ARGS, 2)) || $trace[1]['function']!='add' || ($trace[1]['class']!=World::class && ($trace[1]['class']!=static::class || !World::isset($this->object->key)))))
-				throw new Error('Запуск кода смены компонента можно лишь при добавлении существа в World или при изменении данных уже добавленного '.print_r($trace, true));
+			if
+			(
+				APP_DEBUG 
+				&& 
+				(
+					(!$trace = debug_backtrace(!DEBUG_BACKTRACE_PROVIDE_OBJECT | DEBUG_BACKTRACE_IGNORE_ARGS, 2)) 
+						|| 
+					(
+						!($trace[1]['class']==static::class && $trace[1]['function']=='add')
+							&&
+						!($trace[1]['class']==World::class && !World::isset($this->object->key))						
+						&&
+						!($trace[1]['class']==RemoteCommand::class && $trace[1]['function']=='player_add')
+					)
+				)
+			)
+				throw new Error('Запуск кода смены компонента можно лишь при добавлении существа в World (авторизации с другого устройства) или при изменении данных уже добавленного '.print_r($trace, true));
 			
 			if(APP_DEBUG)
 				$this->object->log('запустим триггер песочницы компонента '.$key);

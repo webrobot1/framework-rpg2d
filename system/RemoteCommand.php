@@ -72,16 +72,16 @@ abstract class RemoteCommand extends World
 		// если переход на карте был слишком ьыстрым
 		if(parent::isset($key))
 		{
-			if(($entity = parent::get($key)) && $entity->map_id != $data['map_id'])
+			if(($player = parent::get($key)) && $player->map_id != $data['map_id'])
 			{
 				if(APP_DEBUG)
-					$entity->log('подключился к новой карте быстрее чем она обработала команду на удаление от старой локации игрока');
+					$player->log('подключился к новой карте быстрее чем она обработала команду на удаление от старой локации игрока');
 					
 				if(!parent::isRemove($key))
 				{
 					// что бы удалить существо с другой карты напрямую нужно поставить флаг системный (тк это не стандартная ситуация)
-					$entity->setPermamentUpdate(true);
-					$entity->remove();
+					$player->setPermamentUpdate(true);
+					$player->remove();
 				}
 				
 				parent::refresh();
@@ -91,7 +91,20 @@ abstract class RemoteCommand extends World
 				if(APP_DEBUG)
 					parent::get($key)->log('повторно вошел по другим ip '.$ip.' по команде от websocket');
 
-				parent::get($key)->ip = $ip;
+				// в компонентах првоеряется что на сцене может и быть существо но если оно ACTION_LOAD  то вышлются параметры которые только при входе высылаются (как с книгой заклинаний)
+				$player->action = SystemActionEnum::ACTION_LOAD;
+				$player->ip = $ip;
+				
+				// Обязательно должен сработает тригер как при первом заходе в игру (может там что то лошлется как в копоненте settings или spellbook), тк websocket не рассылает спецом копоненты при авторизации с другого устройства
+				foreach($player->components->all() as $name=>$value) 
+					$player->components->trigger($name, $value);
+					
+				// код запуска сущностей суда сунуть - объект он уже не поменяет но может там внутри какие то send есть 
+				if(!empty(parent::$entitys_closures[$player->type->value]['in']))
+				{
+					$closure = &parent::$entitys_closures[$player->type->value]['in'];
+					$closure($data);
+				}
 			}			
 		}
 		else
@@ -99,7 +112,9 @@ abstract class RemoteCommand extends World
 			if(APP_DEBUG)
 				PHP::log($key.' входит в игру из websocket');	
 			
-			$data['ip'] = $ip;
+			$data['ip'] = $ip;			
+			// здесь не ставим ACTION_LOAD  тк если авторизация была - он и так придет, а если переход с локации на лкоацию с бесшоынм миром там будет action move и не нало нам на границе вклчать анмиацию ACTION_LOAD (он просто перейдет границу)			
+			
 			parent::add(EntityTypeEnum::Players, $data);					
 		}
 	}
@@ -266,7 +281,7 @@ abstract class RemoteCommand extends World
 						else
 						{
 							if(APP_DEBUG)
-								Perfomance::set('Интерполяция   | своевременность поступления комманд к готовности события '.$group.' %', round($remain/$player->events->get($group)->timeout()*100));		
+								Perfomance::set('Интерполяция   | своевременность поступления комманд к готовности события '.$group, round($remain/$player->events->get($group)->timeout()*100), '%');		
 						}
 					}
 					

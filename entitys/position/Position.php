@@ -78,58 +78,7 @@ class Position extends IPosition
 
 		return $position;
 	}	
-	
-	// проложит луч и вернемт информацию есть ли препятсвия по пути луча/ по умолчанию препятсвия - только непроходимые области на карте (части карты)
-	public function raycast(Position $to, callable $filter = null): bool
-    {
-		$old_distance = $this->distance($to);
-		if($old_distance>0)
-		{
-			if(empty($filter))
-			{
-				$filter = static function (Position $new_position):bool
-				{	
-					if(!empty(Map2D::getTile($new_position->tile())))
-						return true;
-					else
-					{
-						return false;	
-					}
-				};
-			}
 		
-			$new_position = $this;
-			$forward = $new_position->forward($to);
-
-			//if(APP_DEBUG)
-			//	PHP::log('Создаем луч из '.(string)$new_position.' в '.(string)$to.' с направлением '.$forward);
-
-			while(($new_position = $new_position->next($forward)) && $new_position->tile() != $to->tile() && ($new_distance = $new_position->distance($to)))
-			{	
-				//if(APP_DEBUG)
-				//	PHP::log('Перемешаем луч в '.(string)$new_position.' (дистанция '.(string)$new_distance.')');
-				
-				if($new_distance>$old_distance)
-				{
-					PHP::warning('Луч из '.(string)$this.'  с направлением '.(string)$forward.' пролетел мимо конечной точки '.(string)$to);
-					return false;
-				}
-		
-				$result = $filter($new_position);
-				
-				if(!is_bool($result)) 
-					throw new Error('Функция обратного вызова raycast  должна возвращать тип занчения bool');
-				
-				$old_distance = $new_distance;
-				
-				// как только не найденная локация возвращаем false (не проходимость)
-				if(!$result) 
-					return false;
-			}
-		}
-		return true;
-	}	
-	
 	// получить направление движения к цели зная начальную ($this) и конечною (аргумент $position)  позицию
 	public function forward(Position $position):Forward
 	{
@@ -152,14 +101,65 @@ class Position extends IPosition
 	public function normilize():Forward
 	{
 		$length = $this->length();
-		$position = new Position($length, $length, $length);
+		$distance = new Position($length, $length, $length);
 
 		if(APP_DEBUG)
 			PHP::log('Нормалицация вектора: '.(string)$this.' / длинну вектора '.$length);
 
-		$normalize = $this->divide($position);
+		$normalize = $this->divide($distance);
 		return new Forward($normalize->__get('x'), $normalize->__get('y'), $normalize->__get('z'));
 	}
+	
+	// проложит луч и вернемт информацию есть ли препятсвия по пути луча/ по умолчанию препятсвия - только непроходимые области на карте (части карты)
+	public function raycast(Position $to, callable $filter = null): bool
+    {
+		$to_round = $to->round();
+		$old_distance = $this->round()->distance($to_round);
+		if($old_distance>0)
+		{
+			if(empty($filter))
+			{
+				$filter = static function (Position $new_position):bool
+				{	
+					if(!empty(Map2D::getTile($new_position->tile())))
+						return true;
+					else
+					{
+						return false;	
+					}
+				};
+			}
+		
+			$forward = $this->forward($to);
+			
+			// для отладки в случае ошибки
+			$history = array();
+			$history[] = 'Создаем луч из '.(string)$this.' ('.$this->tile().'), дистанция в тайлах '.(string)$old_distance;
+			
+			$new_position = $this;
+			while(($new_position = $new_position->next($forward)) && $new_position->tile() != $to->tile() && ($new_distance = $new_position->distance($to)))
+			{	
+				$history[] = 'Перемешаем луч в '.(string)$new_position.' ('.$new_position->tile().'), дистанция '.(string)$new_distance;
+				if($new_distance>$old_distance)
+				{
+					PHP::warning('Луч в '.(string)$to.' ('.(string)$to_round.') с направлением '.$forward.' при расчетах пролетел мимо цели :'.PHP_EOL.implode(PHP_EOL, $history).PHP_EOL);
+					return false;
+				}
+
+				$result = $filter($new_position);
+				
+				if(!is_bool($result)) 
+					throw new Error('Функция обратного вызова raycast  должна возвращать тип занчения bool');
+				
+				$old_distance = $new_distance;
+				
+				// как только не найденная локация возвращаем false (не проходимость)
+				if(!$result) 
+					return false;
+			}
+		}
+		return true;
+	}	
 	
 	// возвращает строку для поиска в terrarian ячейки массива с указанными координатами
 	public function tile(): string

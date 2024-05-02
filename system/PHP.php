@@ -1,11 +1,11 @@
 <?php
 final class PHP extends RemoteCommand
 {
-	private static array $_closures;							// здесь содержаться замыкания кода и их персональные семафоры (что бы разные выполнения кода могли работать паралельно пока одно ждет результата)
-	private static int $_pid;					   				// теущий pid процесса				   					
 	private static ?int $_start_time;							// время прошедшее с момента как главный процесс передал задачу и мы прочитали ее даныне (по сути стар очередного выполнения кода)
-
 	private static int $_frame = 0;								// текущий фрейм.
+	
+	private static int $_log_count = 0;							// количество логов в секунду
+	private static float $_last_log_perfomance = 0;				// последняя првоерка логов в секунду
 	
 	private static IPCQueue $_local_queue;									
 	private static IPCQueue $_remote_queue;									
@@ -121,7 +121,21 @@ final class PHP extends RemoteCommand
 	// todo проверить на безопасность
 	public static function log($comment):void
 	{
-		echo static::prepare_log($comment).PHP_EOL;			
+		echo static::prepare_log($comment).PHP_EOL;	
+		
+		if(PERFOMANCE_TIMEOUT)
+		{	
+			$hrtime = hrtime(true)/1e9;
+			static::$_log_count++;
+			
+			if($hrtime - static::$_last_log_perfomance>1)
+			{
+				Perfomance::set('Sandbox        | количество логов '.$name, static::$_log_count, 'шт.');
+				
+				static::$_last_log_perfomance = $hrtime;
+				static::$_log_count = 0;				
+			}
+		}
 	}
 
 	// выведет в журнал предупреждений (что же касается ошибок используйте throw конструкцию)
@@ -139,7 +153,13 @@ final class PHP extends RemoteCommand
 		if(!in_array($name, FUNCTIONS))
 			throw new Error('отсутвует функция игрового сервера '.$name.' для запроса ее результата из PHP песочницы');
 		
+		if(PERFOMANCE_TIMEOUT)
+			$start = hrtime(true);
+	
 		static::send($name, $arguments);	
+		
+		if(PERFOMANCE_TIMEOUT)
+			Perfomance::set('Sandbox        | отправка в WebSocket команды '.$name, (hrtime(true) - $start)/1e+6);
 	}
 
 	private static function prepare_log($comment):string

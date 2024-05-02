@@ -47,7 +47,7 @@ abstract class Channel
 		if($publish)
 		{
 			if(APP_DEBUG)
-				PHP::log('отправим с песочницы в WebSocket пакет изменений существ для рассылки '.print_r($publish, true));
+				PHP::log('отправим с песочницы в WebSocket пакет изменений существ для рассылки');
 				
 			static::queue('send_changes', ['publish'=>$publish]);
 		}
@@ -73,7 +73,19 @@ abstract class Channel
 		if(static::$_queue)
 		{
 			if(APP_DEBUG)
-				PHP::log('Возврат в WebSocket '.count(static::$_queue).' команд очереди '.print_r(static::$_queue, true));
+			{
+				if(PERFOMANCE_TIMEOUT)
+					$start = hrtime(true);
+			
+				$log = 'Возврат в WebSocket '.count(static::$_queue).' команд очереди '.print_r(static::$_queue, true);
+				PHP::log($log);
+				
+				if(PERFOMANCE_TIMEOUT)
+				{
+					$time = (hrtime(true) - $start)/1e+6;
+					Perfomance::set('Sandbox        | запись лога', (strlen($log) * (1000/$time))/1000000, 'мбайт/сек.');
+				}
+			}
 			
 			static::$_queue = array();
 		}

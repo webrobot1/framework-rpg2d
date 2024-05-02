@@ -27,7 +27,7 @@ final class IPCQueue
 			$count_parts = ceil($size/$this->max_message_size);
 			
 			if(APP_DEBUG)
-				PHP::log('Cлишком длинное сообщение для отправки из песочницы в общую память ('.$size.' из '.$this->max_message_size.' байт), разбиваем на '.$count_parts);		
+				PHP::warning('Cлишком длинное сообщение для отправки из песочницы в общую память ('.$size.' из '.$this->max_message_size.' байт), разбиваем на '.$count_parts);		
 			
 			for($i=0; $i<$count_parts; $i++)
 			{
@@ -45,8 +45,7 @@ final class IPCQueue
 				$part .= chr(7);
 			
 			if(!msg_send($this->_queue, 1, $part, false, true, $error_code))
-				throw new Error('Ошибка ('.$error_code.') при отправке '.($num+1).'й части сообщения ('.strlen($part).'/'.$size.', '.count($parts).' частей) в общую память: '.$this->error($error_code));
-					
+				throw new Error('Ошибка ('.$error_code.') при отправке '.($num+1).'й части сообщения ('.strlen($part).'/'.$size.', '.count($parts).' частей) в общую память: '.$this->error($error_code));		
 		}
 	}		
 	

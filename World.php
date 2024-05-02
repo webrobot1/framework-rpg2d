@@ -7,7 +7,7 @@ abstract class World extends Channel
 	
 	private static array $_entitys 		= array();				// коллеция существ
 	
-	private static array $_entitys_closures;					// код срабатываемый при загрузки сущеностей
+	protected static array $entitys_closures;					// код срабатываемый при загрузки сущеностей
 	private static Closure $_position_trigger;					// код срабатываемый при смене позиции
 		
 	private static array $_positions 	= array();				// что бы не перебирать ВСЕ объекты методом filter - сделаем матрицу где ключ - позиция объекта и перебираем только нужные		
@@ -18,12 +18,12 @@ abstract class World extends Channel
 	//	при смене ее координат - этот метод запускается при старте game Server передавая в песочницу этот код который берет из базы в админ панели записанный
 	public final static function init(array $codes, ?Closure $positions)
 	{
-		if(isset(self::$_entitys_closures))
+		if(isset(self::$entitys_closures))
 			throw new Error('Инициализация игровой системы уже была произведена');
 
-		if((self::$_entitys_closures = $codes) && APP_DEBUG)
+		if((self::$entitys_closures = $codes) && APP_DEBUG)
 		{
-			foreach(self::$_entitys_closures as $entity_type=>$codes)
+			foreach(self::$entitys_closures as $entity_type=>$codes)
 			{			
 				foreach($codes as $type=>$code)
 				{
@@ -54,7 +54,7 @@ abstract class World extends Channel
 			throw new Error('При создании сущности не указана карта для которой требуется эту сущность создать (можно создавать и на соседних) в пакете'.print_r($data, true)); 
 		
 		$class = ucfirst($type->value);	
-		if(!empty(self::$_entitys_closures[$type->value]['in']))
+		if(!empty(self::$entitys_closures[$type->value]['in']))
 		{
 			try
 			{
@@ -62,10 +62,14 @@ abstract class World extends Channel
 				$recover = Block::current();
 				Block::$objects = true;	
 							
-				$closure = &self::$_entitys_closures[$type->value]['in'];
-				if($entity = $closure($type, $data))
-				{			
-					if(!($entity instanceOf $class))
+				$closure = &self::$entitys_closures[$type->value]['in'];
+				if($entity = $closure($data))
+				{	
+					if($entity === true)
+					{
+						$entity = (new $class(...$data));
+					}
+					elseif(!($entity instanceOf $class))
 						throw new Error('Существо должно быть экземпляром класса '.$class.' созданное из массива '.print_r($data));
 				}
 				else
@@ -160,9 +164,9 @@ abstract class World extends Channel
 				// если пришло пакетом с другой локации не ставим изменением
 				if($entity->map_id==MAP_ID)
 				{
-					if(!empty(self::$_entitys_closures[$entity->type->value]['out']))
+					if(!empty(self::$entitys_closures[$entity->type->value]['out']))
 					{
-						$closure = &self::$_entitys_closures[$entity->type->value]['out'];
+						$closure = &self::$entitys_closures[$entity->type->value]['out'];
 						$closure($entity, $new_map_id);
 					}
 					

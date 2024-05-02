@@ -101,7 +101,7 @@ abstract class EntityAbstract
 		}
 		catch(Throwable $ex)
 		{
-			$this->warning('не верно указаны координаты направления ('.$this->forward_x.Position::DELIMETR.$this->forward_y.Position::DELIMETR.$this->forward_z.') у существа '.$this->key.': '.$ex);
+			$this->warning('не верно указаны координаты направления ('.$this->forward_x.Position::DELIMETR.$this->forward_y.Position::DELIMETR.$this->forward_z.') у существа '.$this->key.': '.PHP_EOL.$ex->getMessage());
 			
 			$this->forward_x = 0;							
 			$this->forward_y = 1;	
@@ -175,7 +175,7 @@ abstract class EntityAbstract
 	}
 	
 	// Возвращает обе части для ключа Redis
-	private static function getKey(int $id):string
+	public static function getKey(int $id):string
 	{
 		return static::getType()->value.EntityTypeEnum::SEPARATOR.$id;
 	}
@@ -435,20 +435,18 @@ abstract class EntityAbstract
 			throw new Error('Нельзя пометить пакет измнений у существа '.$this->key.' с другой локации иначе чем '.$events4remote_change_type);	
 		
 		$change_type = $type->value;
-		
-		// todo сделать уровни логирования тк этот лог очень тормозит особенно при создании существ на 30% 
-		if(APP_DEBUG)
-			$this->log('внесены изменения '.$change_type.' группу рассылки '.print_r($changes, true));	
-		
 		$local_changes = &$this->_changes;
-		
+	
 		// не используем array_replace  тк данные компонентов и событий могут быть массивы и они должны перезаписаться а не слиться воедино со старыми (если старые есть тк в течении кадра событие или компонент могли меняться по несколько раз)
 		if(!empty($local_changes[$change_type]))
 		{		
-			$not_changes = array();
 			$finish_events = array();
+			$not_changes = array();
 			$local_changes[$change_type] = Data::compare_recursive($local_changes[$change_type], $changes, $not_changes, $finish_events);
-						
+			
+			if(APP_DEBUG && $not_changes)
+				$this->log('после уникализации удалены следующие изменения группу рассылки '.$change_type.' '.print_r($not_changes, true));	
+			
 			// если более 1й группы то в других могут остаться пакеты для завершенного события (они удалялились только в своей группе при вызове update_recursive)
 			if($finish_events && count($local_changes)>1)
 			{
@@ -470,15 +468,21 @@ abstract class EntityAbstract
 					}	
 				}	
 			} 
-			
-			if(APP_DEBUG && $not_changes)
-				$this->log('после уникализации удалены следующие изменения '.print_r($not_changes, true));			
 		}
 		else
 		{
 			// не страшно ели там events с обнуленным actin - сервер еще раз проверит пакет и тут уже будет излишни тратить время на првоерки
 			$local_changes[$change_type] = $changes;
 		}
+		
+		// todo сделать уровни логирования тк этот лог очень тормозит особенно при создании существ на 30% 
+		if(APP_DEBUG)
+		{
+			if($changes)
+				$this->log('внесены изменения '.$change_type.' группу рассылки '.print_r($changes, true));	
+			else
+				$this->log('после уникализации изменений группы рассылки '.$change_type.' ничего не осталось уникального');	
+		}			
 	}
 
 	// todo заменить на spl очередь забирая из нее что бы удалялось
