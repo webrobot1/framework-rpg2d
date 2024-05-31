@@ -4,8 +4,9 @@ final class PHP extends RemoteCommand
 	private static ?int $_start_time;							// время прошедшее с момента как главный процесс передал задачу и мы прочитали ее даныне (по сути стар очередного выполнения кода)
 	private static int $_frame = 0;								// текущий фрейм.
 	
+	private static int $_last_frame = 0;						
 	private static int $_log_count = 0;							// количество логов в секунду
-	private static float $_last_log_perfomance = 0;				// последняя првоерка логов в секунду
+	private static float $_log_time = 0;						// общее времязатраты на логи в кадре
 	
 	private static IPCQueue $_local_queue;									
 	private static IPCQueue $_remote_queue;									
@@ -63,6 +64,7 @@ final class PHP extends RemoteCommand
 
 							# сбор всех изменений существ за этот кадр и возврат из в виде одного пакета обратно в Игровой сервер (после он отправит их в WebSocket
 							$return = parent::collected();
+							Perfomance::set('Sandbox        | Время на выполнение вычислений', (hrtime(true)-static::$_start_time)/1e6);
 						break;
 						case 'perfomance':
 							if($data[1][0]<$data[1][1]) 
@@ -119,23 +121,34 @@ final class PHP extends RemoteCommand
 	
 	// сбрасывание в буфер данных будет включаться в общий лог
 	// todo проверить на безопасность
-	public static function log($comment):void
+	public static function log($comment):string
 	{
-		echo static::prepare_log($comment).PHP_EOL;	
-		
 		if(PERFOMANCE_TIMEOUT)
-		{	
-			$hrtime = hrtime(true)/1e9;
-			static::$_log_count++;
+			$start = hrtime(true);
+		
+		$comment = static::prepare_log($comment).PHP_EOL;
+		echo $comment;	
 			
-			if($hrtime - static::$_last_log_perfomance>1)
-			{
-				Perfomance::set('Sandbox        | количество логов '.$name, static::$_log_count, 'шт.');
+		if(PERFOMANCE_TIMEOUT)
+		{
+			$time = (hrtime(true) - $start)/1e+6;
+			Perfomance::set('Логи           | скорость записи', ((strlen($comment) * (1000/$time))/1000000), 'мбайт/сек.');
+			
+			if(static::$_frame != static::$_last_frame)
+			{	
+				Perfomance::set('Логи           | количеств в кадре', static::$_log_count, 'шт.');
+				Perfomance::set('Логи           | минус к скорости', static::$_log_time);
 				
-				static::$_last_log_perfomance = $hrtime;
-				static::$_log_count = 0;				
+				static::$_log_count = 0;		
+				static::$_log_time = 0;		
+				static::$_last_frame = static::$_frame;		
 			}
+
+			static::$_log_count++;
+			static::$_log_time+=$time;
 		}
+		
+		return $comment;
 	}
 
 	// выведет в журнал предупреждений (что же касается ошибок используйте throw конструкцию)
@@ -164,10 +177,10 @@ final class PHP extends RemoteCommand
 
 	private static function prepare_log($comment):string
 	{
-		$datetime = substr_replace((new DateTime())->format("Y-m-d H:i:s:u"), ':', 23, 0);	
-		return $datetime.' '.
+		$datetime = substr_replace((new DateTime())->format("Y-m-d H:i:s:u"), ':', 23, 0).' ';	
+		return $datetime.
 				'| '.str_pad(static::$_frame, 5, ' ').
-				'| sandbox php '.
+				'| php '.
 				'| '.str_pad((isset(static::$_start_time)?round((hrtime(true) - static::$_start_time)/1e+6, 3):'-'), 6, ' ').' '.
 				'| '.(!is_scalar($comment) && !($comment instanceof Stringable)?PHP_EOL.print_r($comment,true):ltrim($comment));
 		

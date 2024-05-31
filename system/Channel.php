@@ -73,19 +73,7 @@ abstract class Channel
 		if(static::$_queue)
 		{
 			if(APP_DEBUG)
-			{
-				if(PERFOMANCE_TIMEOUT)
-					$start = hrtime(true);
-			
-				$log = 'Возврат в WebSocket '.count(static::$_queue).' команд очереди '.print_r(static::$_queue, true);
-				PHP::log($log);
-				
-				if(PERFOMANCE_TIMEOUT)
-				{
-					$time = (hrtime(true) - $start)/1e+6;
-					Perfomance::set('Sandbox        | запись лога', (strlen($log) * (1000/$time))/1000000, 'мбайт/сек.');
-				}
-			}
+				PHP::log('Возврат в WebSocket '.count(static::$_queue).' команд очереди '.print_r(static::$_queue, true));
 			
 			static::$_queue = array();
 		}

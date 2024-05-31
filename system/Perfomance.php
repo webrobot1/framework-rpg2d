@@ -15,10 +15,10 @@ abstract class Perfomance
 		$microtime = microtime(true);
 		if(empty(static::$_time)) static::$_time = $microtime + PERFOMANCE_TIMEOUT;
 
-		if(empty(static::$_abs[$units][$name]))
-			static::$_abs[$units][$name] = array();
+		if(empty(static::$_abs[$name][$units]))
+			static::$_abs[$name][$units] = array();
 		
-		static::$_abs[$units][$name][] = $msec;
+		static::$_abs[$name][$units][] = $msec;
 		
 		// что бы не спамить на сервер запросами при каждом вызове perfomance - будет собирать их тут и отправлять пачками
 		if(static::$_time < $microtime)
@@ -27,17 +27,16 @@ abstract class Perfomance
 			
 			$logs = array();
 			
-			static::$_abs['Мбайт']["Sandbox        | Оперативная память (выделенная)"][] = round(memory_get_usage(true)/1000000, 3);	
-			static::$_abs['Мбайт']["Sandbox        | Оперативная память (используемая)"][] = round(memory_get_usage()/1000000, 3);		
+			static::$_abs["Sandbox        | Оперативная память (выделенная)"]['Мбайт'][] = round(memory_get_usage(true)/1000000, 3);	
+			static::$_abs["Sandbox        | Оперативная память (используемая)"]['Мбайт'][] = round(memory_get_usage()/1000000, 3);		
 			
 			$count = count(array_filter(World::all(), function($entity){ return $entity->map_id == MAP_ID; }));
-			static::$_abs['шт.']["Sandbox        | Количество объектов текущей карты (тратят CPU + RAM + время кадра)"][] = $count;		
-			static::$_abs['шт.']["Sandbox        | Количество копий объектов со смежных карт (тратят RAM)"][] = World::count() - $count;		
+			static::$_abs["Sandbox        | Количество объектов текущей карты (тратят CPU + RAM + время кадра)"]['шт.'][] = $count;		
+			static::$_abs["Sandbox        | Количество копий объектов со смежных карт (тратят RAM)"]['шт.'][] = World::count() - $count;		
 			
-			foreach(static::$_abs as $unit=>$data)
+			foreach(static::$_abs as $name=>$data)
 			{
-				ksort($data, SORT_LOCALE_STRING);
-				foreach($data as $name=>$msec)
+				foreach($data as $unit=>$msec)
 				{				
 					if($total = array_sum($msec)/count($msec))
 					{
@@ -47,14 +46,8 @@ abstract class Perfomance
 			}
 			
 			static::$_abs = array();
-			if($logs)
-			{
-				ksort($logs);				
-				$start = hrtime(true);
-				PHP::perfomance($logs);
-	
-				static::$_abs['мс.']["Sandbox        | Отправка в WebSocket всех perfomance"][] = round((hrtime(true) - $start)/1e+6, 3);					
-			}	
+			if($logs)	
+				PHP::perfomance($logs);					
 		}	
 	}
 }
